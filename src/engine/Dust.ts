@@ -1,4 +1,12 @@
-import { AdditiveBlending, GLSL3, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, RawShaderMaterial, type IUniform } from 'three';
+import {
+  AdditiveBlending,
+  GLSL3,
+  InstancedBufferAttribute,
+  InstancedBufferGeometry,
+  Mesh,
+  RawShaderMaterial,
+  type IUniform,
+} from 'three';
 import { createQuadGeometry } from './gl';
 import type { HazeUniforms } from './Films';
 import { dustFragment, dustVertex } from './shaders/passes';

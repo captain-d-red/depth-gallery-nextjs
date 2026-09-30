@@ -239,7 +239,9 @@ export class Films {
 
   /** Hands the pooled particle systems to the posters that are breaking up this frame. */
   private assignPosterDust(): void {
-    const breaking = this.nodes.filter((n) => n.release > 0.001 && n.release < 0.999 && n.poster.visible).slice(0, DUST_POOL);
+    const breaking = this.nodes
+      .filter((n) => n.release > 0.001 && n.release < 0.999 && n.poster.visible)
+      .slice(0, DUST_POOL);
     this.posterDust.forEach((mesh, i) => {
       const node = breaking[i];
       mesh.visible = node !== undefined;
@@ -279,7 +281,9 @@ export class Films {
     const stack = frame.mode === 'stack';
 
     // Titles nearest the camera are set first, so the one being approached is never late.
-    const order = [...this.nodes].sort((a, b) => Math.abs(a.index - frame.position) - Math.abs(b.index - frame.position));
+    const order = [...this.nodes].sort(
+      (a, b) => Math.abs(a.index - frame.position) - Math.abs(b.index - frame.position),
+    );
     for (const node of order) this.updateNode(node, frame, tilt, stack);
     this.assignPosterDust();
   }
@@ -288,7 +292,7 @@ export class Films {
     const { placement, poster, posterUniforms: u, index } = node;
     const zDist = frame.cameraZ - placement.z;
     const far = 1 - smoothstep(22, 30, zDist);
-    node.release = 1 - smoothstep(0.85, 2.95, zDist);
+    node.release = 1 - smoothstep(1.15, 3.15, zDist);
     node.visible = far * (1 - node.release);
     poster.visible = far > 0.001 && node.release < 0.999;
 

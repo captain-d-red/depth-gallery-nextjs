@@ -131,19 +131,22 @@ void main() {
   vec3 q = vec3(uv * vec2(5.0, 7.5), aCell.z * 7.0 + uSeed * 3.0);
   vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 23.4), valueNoise3(q + 51.9)) - 0.5;
   vec2 away = world.xy - cameraPosition.xy;
-  away = normalize(away + vec2(1e-4)) * (0.35 + 0.65 * smoothstep(0.0, 0.9, length(away)));
-  float travel = 1.0 - exp(-r * 2.2);
-  world.xyz += vec3(away * 0.9 + swirl.xy * 1.1, 0.35 + swirl.z * 0.9) * travel;
-  world.y += r * r * 0.18;
+  away = normalize(away + vec2(1e-4)) * (0.3 + 0.7 * smoothstep(0.0, 0.9, length(away)));
+  float travel = 1.0 - exp(-r * 2.0);
+  world.xyz += vec3(away * 0.5 + swirl.xy * 0.55, -0.25 + swirl.z * 0.35) * travel;
+  world.y += r * r * 0.12;
 
   vec4 view = viewMatrix * world;
   float cell = uPlane.x / uGrid.x;
-  view.xy += position.xy * cell * (0.62 + r * 0.9);
+  view.xy += position.xy * cell * (0.95 - r * 0.45);
   gl_Position = projectionMatrix * view;
 
-  vColor = color * (1.0 + r * 1.6);
+  // Grains flare briefly as they leave the surface, then cool as they drift off.
+  float flare = 1.0 + 1.4 * r * (1.0 - r) * 4.0 * (0.4 + 0.6 * aCell.z);
+  vColor = color * flare;
   vLocal = position.xy;
-  vAlpha = r > 0.0 && r < 1.0 ? pow(1.0 - r, 1.3) * smoothstep(0.0, 0.05, r) * smoothstep(0.05, 0.5, -view.z) : 0.0;
+  float nearFade = smoothstep(0.35, 1.25, -view.z);
+  vAlpha = r > 0.0 && r < 1.0 ? pow(1.0 - r, 1.7) * smoothstep(0.0, 0.04, r) * nearFade * 0.85 : 0.0;
 }
 `;
 
@@ -154,7 +157,7 @@ in float vAlpha;
 out vec4 fragColor;
 void main() {
   if (vAlpha <= 0.0) discard;
-  float a = exp(-dot(vLocal, vLocal) * 2.2) * vAlpha;
+  float a = exp(-dot(vLocal, vLocal) * 4.2) * vAlpha;
   fragColor = vec4(vColor * a, 1.0);
 }
 `;

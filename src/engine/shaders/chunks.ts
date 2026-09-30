@@ -157,12 +157,15 @@ vec3 inscatter(vec3 ro, vec3 rd, float tMax, vec2 density) {
 /**
  * How far text has broken into dust at a given progress. Titles and their particles call the
  * same function, so a glyph fragment disappears at exactly the moment its particle leaves.
- * The front sweeps away from the poster and is broken up by noise, like breath on cold glass.
+ * The front sweeps across the surface, broken up by broad noise into drifts and by fine noise
+ * at particle scale, so the edge crumbles grain by grain instead of cutting a clean line.
  */
 export const release = glsl`
 float releaseAmount(vec2 uv, float seed, float direction, float progress) {
   float sweep = direction > 0.0 ? uv.x : 1.0 - uv.x;
-  float threshold = 0.58 * sweep + 0.42 * valueNoise2(uv * vec2(13.0, 6.5) + seed * 13.7);
+  float threshold = 0.56 * sweep
+    + 0.32 * valueNoise2(uv * vec2(13.0, 6.5) + seed * 13.7)
+    + 0.12 * valueNoise2(uv * vec2(70.0, 105.0) + seed * 5.1);
   return clamp((progress * 1.42 - threshold) / 0.42, 0.0, 1.0);
 }
 `;

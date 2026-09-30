@@ -9,7 +9,8 @@ const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: 'Long Take',
-  description: 'One continuous shot through seventy-two films from 2010 to 2025, each poster lighting the air around it.',
+  description:
+    'One continuous shot through seventy-two films from 2010 to 2025, each poster lighting the air around it.',
   openGraph: {
     title: 'Long Take',
     description: 'One continuous shot through seventy-two films, each poster lighting the air around it.',

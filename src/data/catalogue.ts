@@ -54,14 +54,24 @@ function assertFilm(film: unknown, i: number): void {
   if (!isRecord(film) || !isString(film.slug) || !isString(film.title)) fail(`film ${i} has no slug or title`);
   const { slug } = film;
   if (!isNumber(film.year) || !isNumber(film.minutes)) fail(`${slug} has no year or runtime`);
-  if (!isString(film.director) || !isString(film.logline) || !Array.isArray(film.genres)) fail(`${slug} is missing credits`);
-  if (!isRecord(film.image) || !isString(film.image.src) || !isNumber(film.image.width) || !isNumber(film.image.height)) {
+  if (!isString(film.director) || !isString(film.logline) || !Array.isArray(film.genres))
+    fail(`${slug} is missing credits`);
+  if (
+    !isRecord(film.image) ||
+    !isString(film.image.src) ||
+    !isNumber(film.image.width) ||
+    !isNumber(film.image.height)
+  ) {
     fail(`${slug} has no image`);
   }
   if (!isNumber(film.atlasIndex)) fail(`${slug} has no atlas cell`);
   const light: unknown = film.light;
   const samples = LIGHT_COLUMNS * LIGHT_ROWS;
-  if (!Array.isArray(light) || light.length !== samples || !light.every((s) => Array.isArray(s) && s.length === 4 && s.every(isNumber))) {
+  if (
+    !Array.isArray(light) ||
+    light.length !== samples ||
+    !light.every((s) => Array.isArray(s) && s.length === 4 && s.every(isNumber))
+  ) {
     fail(`${slug} needs ${samples} light samples of four numbers`);
   }
   if (!isRecord(film.palette) || !isHex(film.palette.key) || !isHex(film.palette.fill) || !isHex(film.palette.shade)) {

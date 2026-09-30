@@ -130,7 +130,9 @@ export class Engine {
     this.hazePass = { ...this.haze, ...cameraUniforms, uAmbient: { value: new Vector3() } };
     this.hazeScene.add(createScreenPass(this.screenGeometry, hazeFragment, this.hazePass));
 
-    const backdrop = createScreenPass(this.screenGeometry, backdropFragment, { uHaze: { value: this.hazeTarget.texture } });
+    const backdrop = createScreenPass(this.screenGeometry, backdropFragment, {
+      uHaze: { value: this.hazeTarget.texture },
+    });
     backdrop.renderOrder = -10;
     this.mainScene.add(backdrop);
 
@@ -253,7 +255,12 @@ export class Engine {
       reducedMotion: this.reducedMotion,
     };
     this.films.update(filmsFrame);
-    this.haze.uLightCount.value = this.films.writeLights(filmsFrame, this.haze.uLightPos.value, this.haze.uLightCol.value, MAX_LIGHTS);
+    this.haze.uLightCount.value = this.films.writeLights(
+      filmsFrame,
+      this.haze.uLightPos.value,
+      this.haze.uLightCol.value,
+      MAX_LIGHTS,
+    );
     this.haze.uTime.value = time;
 
     // The ambient floor of the haze follows the shadow tone of the films in frame.
@@ -261,7 +268,9 @@ export class Engine {
     const a = this.shades[i0] ?? this.shades[0]!;
     const b = this.shades[Math.min(i0 + 1, this.shades.length - 1)] ?? a;
     const f = position - i0;
-    (this.hazePass.uAmbient!.value as Vector3).set(lerp(a[0], b[0], f), lerp(a[1], b[1], f), lerp(a[2], b[2], f)).multiplyScalar(0.3 * lightLevel + 0.04);
+    (this.hazePass.uAmbient!.value as Vector3)
+      .set(lerp(a[0], b[0], f), lerp(a[1], b[1], f), lerp(a[2], b[2], f))
+      .multiplyScalar(0.3 * lightLevel + 0.04);
 
     this.writeCameraUniforms();
     this.dust.update({

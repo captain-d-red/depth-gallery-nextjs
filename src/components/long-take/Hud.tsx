@@ -116,7 +116,11 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
         <ol>
           {YEAR_SPANS.map(({ year, first }, slot) => (
             <li key={year} style={{ '--t': slot / YEAR_SPANS.length }}>
-              <button type="button" onClick={() => onJump(first)} aria-current={film.year === year ? 'true' : undefined}>
+              <button
+                type="button"
+                onClick={() => onJump(first)}
+                aria-current={film.year === year ? 'true' : undefined}
+              >
                 {year}
               </button>
             </li>
