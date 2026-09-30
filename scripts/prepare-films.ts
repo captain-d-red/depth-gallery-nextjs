@@ -5,21 +5,31 @@
  *
  * The source folder holds one JPEG per film plus catalogue.json and trailers.meta.json.
  * The script writes 1024px WebP posters and a low-resolution atlas into public/films, and
- * writes src/data/films.json with metadata, grade colours and the light samples that tint
- * the haze around each poster.
+ * writes src/data/films.json with metadata, each poster's vivid key and accent colours, and
+ * the light samples that tint the haze around it.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp, { type OverlayOptions } from 'sharp';
+import { LIGHT_COLUMNS, LIGHT_ROWS } from '../src/data/light-grid.ts';
 import {
+  type Oklch,
   type Vec3,
   linearSrgbToOklab,
   linearToHex,
   oklabToOklch,
   oklchToLinearSrgb,
+  oklchToOklab,
   srgbToLinear,
 } from '../src/lib/color.ts';
+import {
+  NEUTRAL_CHROMA,
+  type VividPalette,
+  familyMembership,
+  vividPalette,
+  vividWeight,
+} from '../src/lib/palette.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argSrc = process.argv.indexOf('--src');
@@ -34,7 +44,11 @@ const dataFile = path.join(root, 'src', 'data', 'films.json');
 const POSTER_HEIGHT = 1024;
 const ATLAS_COLUMNS = 12;
 const CELL = { w: 64, h: 96 } as const;
-const SAMPLE = { w: 48, h: 72 } as const;
+/**
+ * Analysis size. Small on purpose, so thin lettering averages into its background and the
+ * palette follows the large areas of colour a viewer actually remembers.
+ */
+const SAMPLE = { w: 32, h: 48 } as const;
 
 interface SourceTitle {
   slug: string;
@@ -44,27 +58,10 @@ interface SourceTitle {
   min: number;
   genres: string[];
   line: string;
-  dom: [number, number, number];
-  acc: [number, number, number];
 }
 
-const smoothstep = (a: number, b: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
-
-/** Skin sits near a hue of 40 to 70 degrees at modest chroma, and it must not set the light. */
-function skinWeight(C: number, h: number): number {
-  const deg = (h * 180) / Math.PI;
-  const inHue = deg > 25 && deg < 80 ? 1 : 0;
-  return inHue && C < 0.11 ? 0.25 : 1;
-}
-
-interface Pixel {
-  lab: Vec3;
-  L: number;
-  C: number;
-  h: number;
+interface Pixel extends Oklch {
+  readonly lab: Vec3;
 }
 
 function readPixels(buf: Buffer): Pixel[] {
@@ -75,57 +72,60 @@ function readPixels(buf: Buffer): Pixel[] {
       srgbToLinear(buf[i + 1]! / 255),
       srgbToLinear(buf[i + 2]! / 255),
     ]);
-    const { L, C, h } = oklabToOklch(lab);
-    out.push({ lab, L, C, h });
+    out.push({ lab, ...oklabToOklch(lab) });
   }
   return out;
 }
 
 /**
- * One light sample per region. The hue is a chroma-weighted mean in OKLab, so vivid pixels
- * decide it, and the emitted colour is pinned to one lightness so a dark poster still lights
- * the air in its own hue. Strength follows how bright the region really is.
+ * The emitted colour of a family, pinned bright and saturated so it reads as light. A
+ * monochrome poster emits a faintly warm white instead of an invented hue.
  */
-function regionLight(pixels: Pixel[], fallbackHue: number): [number, number, number, number] {
-  let wa = 0;
-  let wb = 0;
-  let wsum = 0;
-  let lsum = 0;
-  let csum = 0;
-  for (const p of pixels) {
-    const w = p.C ** 1.4 * smoothstep(0.1, 0.32, p.L) * skinWeight(p.C, p.h);
-    wa += p.lab[1] * w;
-    wb += p.lab[2] * w;
-    wsum += w;
-    csum += p.C;
-    lsum += p.L;
+function lightColour({ C, h }: Oklch): Oklch {
+  if (C < NEUTRAL_CHROMA) return { L: 0.74, C: 0.022, h };
+  return { L: 0.7, C: Math.min(0.2, Math.max(0.1, C * 1.3)), h };
+}
+
+/**
+ * One light sample per region of the poster. Each region glows in the key or the accent,
+ * whichever of the two it actually contains, and glows as brightly as that colour is present,
+ * so the light comes from where the vivid colour sits on the print.
+ */
+function regionLights(pixels: Pixel[], palette: VividPalette): [number, number, number, number][] {
+  const presence = (region: Pixel[], colour: Oklch) =>
+    region.reduce((sum, p) => sum + vividWeight(p) * familyMembership(p, colour.h), 0);
+  const regions: Pixel[][] = [];
+  const rw = SAMPLE.w / LIGHT_COLUMNS;
+  const rh = SAMPLE.h / LIGHT_ROWS;
+  for (let ry = 0; ry < LIGHT_ROWS; ry++) {
+    for (let rx = 0; rx < LIGHT_COLUMNS; rx++) {
+      const region: Pixel[] = [];
+      for (let y = ry * rh; y < (ry + 1) * rh; y++) {
+        for (let x = rx * rw; x < (rx + 1) * rw; x++) region.push(pixels[y * SAMPLE.w + x]!);
+      }
+      regions.push(region);
+    }
   }
-  const meanL = lsum / pixels.length;
-  const meanC = csum / pixels.length;
-  const hue = wsum > 1e-6 ? Math.atan2(wb, wa) : fallbackHue;
-  const chroma = Math.min(0.19, Math.max(0.035, meanC * 1.6));
-  const rgb = oklchToLinearSrgb({ L: 0.64, C: chroma, h: hue < 0 ? hue + Math.PI * 2 : hue });
-  const strength = 0.3 + 0.7 * smoothstep(0.12, 0.62, meanL);
+  const key = lightColour(palette.key);
+  const accent = palette.accent ? lightColour(palette.accent) : key;
+  const votes = regions.map((r) => {
+    const a = palette.accent ? presence(r, palette.accent) : 0;
+    return { a, total: presence(r, palette.key) + a };
+  });
+  const peak = Math.max(...votes.map((v) => v.total), 1e-9);
   const round = (v: number) => Math.round(v * 1000) / 1000;
-  return [round(rgb[0]), round(rgb[1]), round(rgb[2]), round(strength)];
+  const [k0, k1, k2] = oklchToOklab(key);
+  const [a0, a1, a2] = oklchToOklab(accent);
+  return votes.map(({ a, total }) => {
+    const t = total > 0 ? a / total : 0;
+    const lab: Vec3 = [k0 + (a0 - k0) * t, k1 + (a1 - k1) * t, k2 + (a2 - k2) * t];
+    const rgb = oklchToLinearSrgb(oklabToOklch(lab));
+    const strength = 0.22 + 0.78 * (total / peak) ** 0.6;
+    return [round(rgb[0]), round(rgb[1]), round(rgb[2]), round(strength)];
+  });
 }
 
-function shadeTone(pixels: Pixel[]): string {
-  const sorted = [...pixels].sort((a, b) => a.L - b.L);
-  const dark = sorted.slice(0, Math.max(1, Math.floor(sorted.length * 0.3)));
-  const mean = dark.reduce<[number, number, number]>(
-    (acc, p) => [acc[0] + p.lab[0], acc[1] + p.lab[1], acc[2] + p.lab[2]],
-    [0, 0, 0],
-  );
-  const lch = oklabToOklch([mean[0] / dark.length, mean[1] / dark.length, mean[2] / dark.length]);
-  return linearToHex(
-    oklchToLinearSrgb({ L: Math.min(0.3, Math.max(0.16, lch.L)), C: Math.min(0.07, lch.C), h: lch.h }),
-  );
-}
-
-function hexFromSrgb8([r, g, b]: [number, number, number]): string {
-  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
-}
+const hex = (colour: Oklch) => linearToHex(oklchToLinearSrgb(colour));
 
 async function main() {
   const source = JSON.parse(await fs.readFile(path.join(srcDir, 'catalogue.json'), 'utf8')) as {
@@ -137,18 +137,28 @@ async function main() {
   >;
   await fs.mkdir(outDir, { recursive: true });
 
-  const titles = [...source.titles];
-  const keyHue = ({ dom: [r, g, b] }: SourceTitle) =>
-    oklabToOklch(linearSrgbToOklab([srgbToLinear(r / 255), srgbToLinear(g / 255), srgbToLinear(b / 255)])).h;
+  // Each poster is read once at analysis size, and its vivid palette decides both its light
+  // and its place inside its year.
+  const analysed = await Promise.all(
+    source.titles.map(async (t) => {
+      const raw = await sharp(path.join(srcDir, `${t.slug}.jpg`))
+        .resize(SAMPLE.w, SAMPLE.h, { fit: 'fill', kernel: 'mitchell' })
+        .removeAlpha()
+        .raw()
+        .toBuffer();
+      const pixels = readPixels(raw);
+      return { t, pixels, palette: vividPalette(pixels) };
+    }),
+  );
   // Time runs into the screen, so films are ordered by year. Inside a year they follow hue,
   // which lets the haze drift between neighbouring colours instead of jumping.
-  titles.sort((a, b) => a.year - b.year || keyHue(a) - keyHue(b));
+  analysed.sort((a, b) => a.t.year - b.t.year || a.palette.key.h - b.palette.key.h);
 
-  const rows = Math.ceil(titles.length / ATLAS_COLUMNS);
+  const rows = Math.ceil(analysed.length / ATLAS_COLUMNS);
   const atlasTiles: OverlayOptions[] = [];
   const films = [];
 
-  for (const [index, t] of titles.entries()) {
+  for (const [index, { t, pixels, palette }] of analysed.entries()) {
     const file = path.join(srcDir, `${t.slug}.jpg`);
     const poster = sharp(file).rotate();
     const out = await poster
@@ -165,21 +175,7 @@ async function main() {
       top: Math.floor(index / ATLAS_COLUMNS) * CELL.h,
     });
 
-    const sample = await sharp(file).resize(SAMPLE.w, SAMPLE.h, { fit: 'fill' }).removeAlpha().raw().toBuffer();
-    const pixels = readPixels(sample);
-    const hue = keyHue(t);
-    const light: [number, number, number, number][] = [];
-    const rw = SAMPLE.w / 2;
-    const rh = SAMPLE.h / 3;
-    for (let ry = 0; ry < 3; ry++) {
-      for (let rx = 0; rx < 2; rx++) {
-        const region: Pixel[] = [];
-        for (let y = ry * rh; y < (ry + 1) * rh; y++) {
-          for (let x = rx * rw; x < (rx + 1) * rw; x++) region.push(pixels[y * SAMPLE.w + x]!);
-        }
-        light.push(regionLight(region, hue));
-      }
-    }
+    const light = regionLights(pixels, palette);
 
     const trailer = trailers[t.slug];
     films.push({
@@ -193,7 +189,7 @@ async function main() {
       image: { src: `/films/${t.slug}.webp`, width: out.info.width, height: out.info.height },
       atlasIndex: index,
       light,
-      palette: { key: hexFromSrgb8(t.dom), fill: hexFromSrgb8(t.acc), shade: shadeTone(pixels) },
+      palette: { key: hex(lightColour(palette.key)), accent: hex(lightColour(palette.accent ?? palette.key)) },
       trailer: trailer ? { id: trailer.id, aspect: trailer.a } : null,
     });
   }

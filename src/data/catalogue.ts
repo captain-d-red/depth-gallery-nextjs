@@ -1,4 +1,5 @@
 import raw from './films.json';
+import { LIGHT_COLUMNS, LIGHT_ROWS } from './light-grid';
 
 /** One light sample on a poster, as linear RGB plus an emission strength. */
 export type LightSample = readonly [r: number, g: number, b: number, strength: number];
@@ -19,8 +20,11 @@ export interface Film {
    * top left. The haze is lit by these, so the air around a poster carries its colours.
    */
   readonly light: readonly LightSample[];
-  /** Grade chip colours as sRGB hex, the vivid key, a secondary fill and the shadow tone. */
-  readonly palette: { readonly key: string; readonly fill: string; readonly shade: string };
+  /**
+   * The poster's most vivid colour and a second one, as sRGB hex. The accent equals the key
+   * when the poster carries only one colour worth lighting a room with.
+   */
+  readonly palette: { readonly key: string; readonly accent: string };
   readonly trailer: { readonly id: string; readonly aspect: number } | null;
 }
 
@@ -38,8 +42,7 @@ export interface Catalogue {
   readonly films: readonly Film[];
 }
 
-export const LIGHT_COLUMNS = 2;
-export const LIGHT_ROWS = 3;
+export { LIGHT_COLUMNS, LIGHT_ROWS };
 
 function fail(message: string): never {
   throw new Error(`films.json: ${message}`);
@@ -74,8 +77,8 @@ function assertFilm(film: unknown, i: number): void {
   ) {
     fail(`${slug} needs ${samples} light samples of four numbers`);
   }
-  if (!isRecord(film.palette) || !isHex(film.palette.key) || !isHex(film.palette.fill) || !isHex(film.palette.shade)) {
-    fail(`${slug} has an incomplete grade palette`);
+  if (!isRecord(film.palette) || !isHex(film.palette.key) || !isHex(film.palette.accent)) {
+    fail(`${slug} has an incomplete palette`);
   }
 }
 
