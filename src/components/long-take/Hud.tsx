@@ -52,6 +52,9 @@ const RULER = Array.from({ length: YEARS.length * DIVISIONS + 1 }, (_, k) => ({
   mark: k % DIVISIONS === 0 ? 'major' : k % (DIVISIONS / 2) === 0 ? 'half' : 'minor',
 }));
 
+/** Scroll speed, in films per second, at which the rail's crest reaches its widest. */
+const FULL_SPEED = 3;
+
 /** The streaming site's sections. This build ships the films view, so each link returns home. */
 const SECTIONS = ['Home', 'Films', 'Series', 'New and Popular', 'My List'] as const;
 
@@ -82,8 +85,7 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
   const timecodeRef = useRef<HTMLSpanElement>(null);
   const focusRef = useRef<HTMLSpanElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
-  const ticksRef = useRef<(HTMLSpanElement | null)[]>([]);
-  const last = useRef({ timecode: '', focus: '', rail: -1 });
+  const last = useRef({ timecode: '', focus: '', rail: -1, speed: '' });
   const [preview, setPreview] = useState<number | null>(null);
   const [moved, setMoved] = useState(false);
 
@@ -99,17 +101,16 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
         focusRef.current.textContent = focus;
         last.current.focus = focus;
       }
+      // The rail's crest is drawn in CSS from these two values, the playhead and the speed.
       if (Math.abs(frame.position - last.current.rail) > 0.002) {
         last.current.rail = frame.position;
-        const t = railPosition(frame.position);
-        railRef.current?.style.setProperty('--t', t.toFixed(4));
-        // Divisions near the playhead light up in the film's colour. Lengths never change,
-        // so the rail stays a true scale while the light slides along it.
-        ticksRef.current.forEach((tick, k) => {
-          const d = (RULER[k]!.t - t) * YEARS.length * DIVISIONS;
-          tick?.style.setProperty('--m', Math.exp(-d * d * 0.08).toFixed(3));
-        });
+        railRef.current?.style.setProperty('--t', railPosition(frame.position).toFixed(5));
         if (!moved && frame.position > 0.15) setMoved(true);
+      }
+      const speed = Math.min(Math.abs(frame.scrollSpeed) / FULL_SPEED, 1).toFixed(2);
+      if (speed !== last.current.speed) {
+        railRef.current?.style.setProperty('--v', speed);
+        last.current.speed = speed;
       }
     },
   }));
@@ -136,9 +137,14 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
       </div>
 
       <header className={styles.top}>
-        <p className={styles.brand}>
-          AK47<span className={styles.section}>Depth Gallery Experience</span>
-        </p>
+        <Link className={styles.brand} href="/" aria-label="AK47, Depth Gallery Experience">
+          <svg className={styles.mark} viewBox="0 0 40 40" aria-hidden="true">
+            <path d="M20 4 L36 35 H29.5 L20 16.5 L10.5 35 H4 Z" fill="currentColor" />
+            <circle cx="20" cy="27.5" r="3.2" fill="var(--rec)" />
+          </svg>
+          <span className={styles.word}>AK47</span>
+          <span className={styles.section}>Depth Gallery Experience</span>
+        </Link>
         <nav className={styles.links} aria-label="Sections">
           {SECTIONS.map((section) => (
             <Link key={section} href="/" aria-current={section === 'Films' ? 'page' : undefined}>
@@ -154,22 +160,15 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
       <div
         ref={railRef}
         className={styles.rail}
+        style={{ '--divisions': YEARS.length * DIVISIONS }}
         onPointerMove={(e) => setPreview(nearestFilm(e))}
         onPointerLeave={() => setPreview(null)}
         onClick={(e) => onJump(nearestFilm(e))}
       >
         <span className={styles.spine} aria-hidden="true" />
         <span className={styles.ticks} aria-hidden="true">
-          {RULER.map(({ t, mark }, k) => (
-            <span
-              key={t}
-              ref={(el) => {
-                ticksRef.current[k] = el;
-              }}
-              className={styles.tick}
-              data-mark={mark}
-              style={{ '--y': t }}
-            />
+          {RULER.map(({ t, mark }) => (
+            <span key={t} className={styles.tick} data-mark={mark} style={{ '--y': t }} />
           ))}
         </span>
         <span className={styles.bead} aria-hidden="true" />

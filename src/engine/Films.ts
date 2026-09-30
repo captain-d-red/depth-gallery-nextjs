@@ -74,8 +74,10 @@ export interface FilmsFrame {
   readonly cameraZ: number;
   readonly time: number;
   readonly dt: number;
-  /** Signed travel speed in films per second. */
+  /** Signed travel speed of the camera in films per second. */
   readonly velocity: number;
+  /** Signed speed of the scroll itself in films per second, before the dwell reshapes it. */
+  readonly scrollSpeed: number;
   /** Smoothed scroll direction, from -1 to 1, which lets posters trail a little. */
   readonly drift: number;
   readonly mode: LayoutMode;
@@ -96,14 +98,11 @@ interface FilmNode {
   readonly width: number;
   readonly key: Vec3;
   readonly ink: Vec3;
-  readonly sheen: Vector2;
   map: Texture | null;
   bitmap: ImageBitmap | null;
   mapState: LoadState;
   hover: number;
   tilt: Vector2;
-  sway: number;
-  swayVelocity: number;
   /** How formed the poster is, one when framed or approaching and zero once it is ash. */
   visible: number;
   /** How far the poster has broken into ash as the camera walks through it. */
@@ -126,6 +125,10 @@ const DUST_GRID = { columns: 150, rows: 225 } as const;
 const DUST_POOL = 2;
 /** Draw order steps per film. Deeper films draw first, so the scene paints back to front. */
 const ORDER_STEP = 10;
+/** Greatest lean of a print into the scroll, in radians, about six degrees. */
+const SWAY_MAX = 0.1;
+/** Lean per film per second of scroll speed, in radians, before the lean saturates. */
+const SWAY_GAIN = 0.06;
 
 const PAPER: Vec3 = hexToLinear('#efe8dc');
 const tmp = new Vector3();
@@ -203,7 +206,6 @@ export class Films {
       const col = index % a.columns;
       const row = Math.floor(index / a.columns);
       const key = hexToLinear(film.palette.key);
-      const sheen = new Vector2(0.5, 0.6);
       const uniforms: Record<string, IUniform> = {
         ...haze,
         ...lens,
@@ -216,10 +218,8 @@ export class Films {
         uFar: { value: 1 },
         uRelease: { value: 0 },
         uDirection: { value: placement.side },
-        uHover: { value: 0 },
         uSeed: { value: (index * 0.618) % 1 },
         ...rimGradient(film),
-        uSheen: { value: sheen },
       };
       const poster = new Mesh(
         new PlaneGeometry(width + 2 * PAD, POSTER_HEIGHT + 2 * PAD),
@@ -246,14 +246,11 @@ export class Films {
         width,
         key,
         ink: mixVec(PAPER, key, 0.12),
-        sheen,
         map: null,
         bitmap: null,
         mapState: 'idle' as LoadState,
         hover: 0,
         tilt: new Vector2(),
-        sway: 0,
-        swayVelocity: 0,
         visible: 0,
         release: 0,
         title: null,
@@ -314,22 +311,18 @@ export class Films {
     node.visible = far * (1 - node.release);
     poster.visible = far > 0.001 && node.release < 0.999;
 
-    // Hanging prints swing on a soft spring when the camera rushes past them.
+    // Hanging prints lean into the scroll. The lean is a direct function of how fast the
+    // hand is scrolling, saturating softly, so it rises the moment the scroll starts and
+    // settles as the scroll comes to rest, with no spring left swinging behind it.
     const still = frame.reducedMotion;
     const proximity = smoothstep(9, 2.4, zDist);
-    const swayTarget = still ? 0 : clamp(frame.velocity * 0.06 * proximity, -0.1, 0.1);
-    node.swayVelocity += ((swayTarget - node.sway) * 18 - node.swayVelocity * 2.4) * frame.dt;
-    node.sway += node.swayVelocity * frame.dt;
+    const sway = still ? 0 : proximity * SWAY_MAX * Math.tanh((frame.scrollSpeed * SWAY_GAIN) / SWAY_MAX);
 
-    // The pointer leans the print toward it and slides a highlight across its coat.
+    // The pointer leans the print toward it.
     const hit = frame.hovered?.index === index ? frame.hovered : null;
     node.hover = damp(node.hover, hit ? 1 : 0, 9, frame.dt);
     if (hit) {
       node.tilt.set(damp(node.tilt.x, hit.u - 0.5, 8, frame.dt), damp(node.tilt.y, hit.v - 0.5, 8, frame.dt));
-      node.sheen.set(
-        damp(node.sheen.x, 0.2 + (1 - hit.u) * 0.6, 7, frame.dt),
-        damp(node.sheen.y, 0.25 + (1 - hit.v) * 0.6, 7, frame.dt),
-      );
     } else {
       node.tilt.set(damp(node.tilt.x, 0, 5, frame.dt), damp(node.tilt.y, 0, 5, frame.dt));
     }
@@ -340,15 +333,14 @@ export class Films {
     const y = (stack ? 0.36 : placement.y) + (still ? 0 : frame.drift * 0.05 * smoothstep(1, 6, zDist));
     poster.position.set(x, y, placement.z + lean * 0.06);
     poster.rotation.set(
-      node.sway - node.tilt.y * 0.14 * lean,
+      sway - node.tilt.y * 0.14 * lean,
       (stack ? 0 : placement.yaw) + node.tilt.x * 0.18 * lean,
-      placement.roll + node.sway * 0.35 * placement.side,
+      placement.roll + sway * 0.35 * placement.side,
     );
     poster.scale.setScalar(scale);
 
     u.uFar!.value = far;
     u.uRelease!.value = node.release;
-    u.uHover!.value = node.hover;
 
     // Stream the full poster near the camera, and let go of it once it is well behind.
     const rel = index - frame.position;
@@ -634,7 +626,7 @@ export class Films {
           const sample = node.film.light[r * LIGHT_COLUMNS + c]!;
           tmp.set((c - 0.5) * w * 0.52, (1 - r) * (POSTER_HEIGHT / 3.1), 0.05).applyMatrix4(poster.matrixWorld);
           positions.set([tmp.x, tmp.y, tmp.z, poster.position.z], n * 4);
-          const k = sample[3] * node.visible * frame.lightLevel * (1 + 0.35 * node.hover);
+          const k = sample[3] * node.visible * frame.lightLevel;
           colors.set([sample[0] * k, sample[1] * k, sample[2] * k, 0], n * 4);
           n++;
         }

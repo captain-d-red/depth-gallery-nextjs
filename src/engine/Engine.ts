@@ -46,7 +46,8 @@ export interface EngineInput {
 export interface EngineFrame {
   readonly position: number;
   readonly index: number;
-  readonly velocity: number;
+  /** Signed scroll speed in films per second, the rate the hand is asking for. */
+  readonly scrollSpeed: number;
   /** Distance the lens is focused at, for the viewfinder readout. */
   readonly focusDistance: number;
   readonly hovered: number | null;
@@ -99,7 +100,8 @@ export class Engine {
   private mode: LayoutMode = 'spread';
   private startTime: number | null = null;
   private lastTime = 0;
-  private lastPosition: number | null = null;
+  private lastScroll: number | null = null;
+  private scrollSpeed = 0;
   private velocity = 0;
   private drift = 0;
   private focus = FOCUS;
@@ -262,10 +264,14 @@ export class Engine {
     this.lastTime = time;
     const intro = this.reducedMotion ? 1 : clamp((time - this.startTime) / INTRO_SECONDS, 0, 1);
 
-    const position = dwell(clamp(input.position, 0, this.films.count - 1));
-    const raw = this.lastPosition === null ? 0 : (position - this.lastPosition) / dt;
-    this.lastPosition = position;
-    this.velocity = damp(this.velocity, raw, 9, dt);
+    const scroll = clamp(input.position, 0, this.films.count - 1);
+    const previous = this.lastScroll ?? scroll;
+    this.lastScroll = scroll;
+    const position = dwell(scroll);
+    // The scroller already eases its position, so its rate needs only enough smoothing to
+    // even out single wheel notches. Anything slower would trail behind the hand.
+    this.scrollSpeed = damp(this.scrollSpeed, (scroll - previous) / dt, 16, dt);
+    this.velocity = damp(this.velocity, (position - dwell(previous)) / dt, 9, dt);
     this.drift = damp(this.drift, clamp(this.velocity * 0.6, -1, 1), 2.6, dt);
 
     this.placeCamera(position, intro, input, dt);
@@ -278,6 +284,7 @@ export class Engine {
       time,
       dt,
       velocity: this.velocity,
+      scrollSpeed: this.scrollSpeed,
       drift: this.drift,
       mode: this.mode,
       lightLevel,
@@ -338,7 +345,7 @@ export class Engine {
     return {
       position,
       index: clamp(Math.round(position), 0, this.films.count - 1),
-      velocity: this.velocity,
+      scrollSpeed: this.scrollSpeed,
       focusDistance: this.focus,
       hovered: this.hovered?.index ?? null,
     };

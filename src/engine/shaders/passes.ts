@@ -56,7 +56,6 @@ void main() {
  * - A hairline rim runs round the frame, graded from the colour at the top of the print to
  *   the colour at its foot, so it continues the image rather than boxing it in.
  * - The backlight falls off toward the frame and the paper has a fine tooth up close.
- * - Under the pointer, a clear-coat highlight slides across the print.
  * - As the camera walks through, the print dissolves. Just ahead of the release front it
  *   thins out while its particles, already in place and wearing the same colours, fade in
  *   over it, so the image turns to grain with no visible line.
@@ -78,11 +77,9 @@ uniform vec2 uPad;
 uniform float uFar;
 uniform float uRelease;
 uniform float uDirection;
-uniform float uHover;
 uniform float uSeed;
 uniform vec3 uRimTop;
 uniform vec3 uRimBottom;
-uniform vec2 uSheen;
 in vec2 vUv;
 in vec3 vWorld;
 out vec4 fragColor;
@@ -136,11 +133,6 @@ void main() {
   col *= 0.9 + 0.1 * smoothstep(0.0, 0.32, edge);
   float magnified = clamp(1.4 - uvPerPx.y * uMapSize.y, 0.0, 1.0) * (1.0 - smoothstep(1.0, 3.0, coc));
   col *= 1.0 + (valueNoise2(cuv * uMapSize * 0.7) - 0.5) * 0.05 * magnified;
-
-  // Clear coat. A broad soft sheen and a tighter core, stretched like a studio softbox.
-  vec2 d = (cuv - uSheen) * vec2(1.0, 0.58);
-  float spec = exp(-dot(d, d) * 6.0) * 0.16 + exp(-dot(d, d) * 55.0) * 0.14;
-  col += spec * uHover * vec3(1.0, 0.98, 0.95);
 
   // The handoff to the particles, which fade in over the print as it fades out.
   coverage *= 1.0 - smoothstep(-HANDOFF, 0.0, front);
