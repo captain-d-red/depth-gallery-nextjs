@@ -8,12 +8,12 @@ const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: 'Long Take',
+  title: 'AK47 · Through the Years',
   description:
-    'One continuous shot through seventy-two films from 2010 to 2025, each poster lighting the air around it.',
+    'Browse seventy-two films from 2010 to 2025 in one continuous camera move, each poster lighting the air around it.',
   openGraph: {
-    title: 'Long Take',
-    description: 'One continuous shot through seventy-two films, each poster lighting the air around it.',
+    title: 'AK47 · Through the Years',
+    description: 'Browse seventy-two films in one continuous camera move, each poster lighting the air around it.',
     type: 'website',
   },
   twitter: { card: 'summary_large_image' },

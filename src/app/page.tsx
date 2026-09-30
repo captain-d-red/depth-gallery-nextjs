@@ -6,7 +6,7 @@ export default function Home() {
     <main>
       <LongTake />
       <section className="sr-only" aria-labelledby="index-heading">
-        <h1 id="index-heading">Long Take, seventy-two films from 2010 to 2025</h1>
+        <h1 id="index-heading">AK47, Through the Years, seventy-two films from 2010 to 2025</h1>
         <ol>
           {catalogue.films.map((film) => (
             <li key={film.slug}>

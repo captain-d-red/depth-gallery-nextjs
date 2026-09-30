@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# Long Take
+# AK47 · Through the Years
 
 A scroll-driven WebGL depth gallery of film posters. Read `README.md` for the architecture.
 

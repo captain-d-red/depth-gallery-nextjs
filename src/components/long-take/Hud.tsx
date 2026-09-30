@@ -121,7 +121,7 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
 
       <header className={styles.top}>
         <p className={styles.brand}>
-          Obscura<span className={styles.section}>Through the Years</span>
+          AK47<span className={styles.section}>Through the Years</span>
         </p>
         <p className={styles.rec} aria-hidden="true">
           <span className={styles.dot} />
