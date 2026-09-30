@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# AK47 · Through the Years
+# AK47 · Depth Gallery Experience
 
 A scroll-driven WebGL depth gallery of film posters. Read `README.md` for the architecture.
 

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useImperativeHandle, useRef, useState, type MouseEvent, type Ref } from 'react';
 import { catalogue, type Film } from '@/data/catalogue';
 import type { EngineFrame } from '@/engine/Engine';
@@ -41,7 +42,17 @@ const FILM_T = films.map((film, i) => {
   return (slot + (i - span.first + 0.5) / span.count) / YEARS.length;
 });
 
-/** Rail position of a continuous film position, interpolated between neighbouring ticks. */
+/** Ruler divisions per year. The rail is a true scale, so every division is the same size. */
+const DIVISIONS = 4;
+const RULER = Array.from({ length: YEARS.length * DIVISIONS + 1 }, (_, k) => ({
+  t: k / (YEARS.length * DIVISIONS),
+  major: k % DIVISIONS === 0,
+}));
+
+/** The streaming site's sections. This build ships the films view, so each link returns home. */
+const SECTIONS = ['Home', 'Films', 'Series', 'New and Popular', 'My List'] as const;
+
+/** Rail position of a continuous film position, interpolated between neighbouring films. */
 function railPosition(position: number): number {
   const i = Math.min(COUNT - 1, Math.max(0, Math.floor(position)));
   const next = Math.min(COUNT - 1, i + 1);
@@ -87,11 +98,13 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
       }
       if (Math.abs(frame.position - last.current.rail) > 0.002) {
         last.current.rail = frame.position;
-        railRef.current?.style.setProperty('--t', railPosition(frame.position).toFixed(4));
-        // Ticks swell as the playhead nears them, like a loupe sliding along the rail.
-        ticksRef.current.forEach((tick, i) => {
-          const d = i - frame.position;
-          tick?.style.setProperty('--m', Math.exp(-d * d * 0.35).toFixed(3));
+        const t = railPosition(frame.position);
+        railRef.current?.style.setProperty('--t', t.toFixed(4));
+        // Divisions near the playhead light up in the film's colour. Lengths never change,
+        // so the rail stays a true scale while the light slides along it.
+        ticksRef.current.forEach((tick, k) => {
+          const d = (RULER[k]!.t - t) * YEARS.length * DIVISIONS;
+          tick?.style.setProperty('--m', Math.exp(-d * d * 0.5).toFixed(3));
         });
         if (!moved && frame.position > 0.15) setMoved(true);
       }
@@ -121,15 +134,18 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
 
       <header className={styles.top}>
         <p className={styles.brand}>
-          AK47<span className={styles.section}>Through the Years</span>
+          AK47<span className={styles.section}>Depth Gallery Experience</span>
         </p>
-        <p className={styles.rec} aria-hidden="true">
-          <span className={styles.dot} />
-          <span>Rec</span>
-          <span ref={timecodeRef} className={styles.num}>
-            00:00:00:00
-          </span>
-        </p>
+        <nav className={styles.links} aria-label="Sections">
+          {SECTIONS.map((section) => (
+            <Link key={section} href="/" aria-current={section === 'Films' ? 'page' : undefined}>
+              {section}
+            </Link>
+          ))}
+        </nav>
+        <Link className={styles.login} href="/">
+          Log in
+        </Link>
       </header>
 
       <div
@@ -141,15 +157,15 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
       >
         <span className={styles.spine} aria-hidden="true" />
         <span className={styles.ticks} aria-hidden="true">
-          {films.map((f, i) => (
+          {RULER.map(({ t, major }, k) => (
             <span
-              key={f.slug}
+              key={t}
               ref={(el) => {
-                ticksRef.current[i] = el;
+                ticksRef.current[k] = el;
               }}
               className={styles.tick}
-              data-year-start={i === 0 || films[i - 1]!.year !== f.year ? '' : undefined}
-              style={{ '--y': FILM_T[i]! }}
+              data-major={major ? '' : undefined}
+              style={{ '--y': t }}
             />
           ))}
         </span>
@@ -207,6 +223,13 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
         </p>
 
         <p className={styles.focus} aria-hidden="true">
+          <span className={styles.rec}>
+            <span className={styles.dot} />
+            <span>Rec</span>
+            <span ref={timecodeRef} className={styles.num}>
+              00:00:00:00
+            </span>
+          </span>
           <span className={styles.label}>Focus</span>
           <span ref={focusRef} className={styles.num}>
             3.30

@@ -8,11 +8,11 @@ const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: 'AK47 · Through the Years',
+  title: 'AK47 · Depth Gallery Experience',
   description:
     'Browse seventy-two films from 2010 to 2025 in one continuous camera move, each poster lighting the air around it.',
   openGraph: {
-    title: 'AK47 · Through the Years',
+    title: 'AK47 · Depth Gallery Experience',
     description: 'Browse seventy-two films in one continuous camera move, each poster lighting the air around it.',
     type: 'website',
   },

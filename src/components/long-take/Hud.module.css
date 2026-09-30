@@ -66,9 +66,65 @@
   top: calc(var(--gutter) + 1.1em);
   left: calc(var(--gutter) + 1.45em);
   right: calc(var(--gutter) + 1.45em);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+}
+
+.links {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  gap: 2.2em;
+  pointer-events: auto;
+}
+
+.links a {
+  position: relative;
+  padding: 0.4em 0;
+  font-size: 1.05em;
+  font-weight: 520;
+  letter-spacing: 0.01em;
+  color: var(--paper-2);
+  text-decoration: none;
+  transition: color 0.3s var(--ease);
+}
+
+.links a:hover,
+.links a[aria-current='page'] {
+  color: var(--paper);
+}
+
+.links a[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.1em;
+  height: 1px;
+  background: var(--key);
+  box-shadow: 0 0 0.6em var(--key);
+  transition: background-color 0.8s var(--ease);
+}
+
+.login {
+  justify-self: end;
+  padding: 0.62em 1.35em;
+  border: 1px solid rgb(239 232 220 / 0.28);
+  border-radius: 99em;
+  background: rgb(239 232 220 / 0.06);
+  backdrop-filter: blur(12px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--paper);
+  text-decoration: none;
+  pointer-events: auto;
+  transition:
+    background-color 0.3s var(--ease),
+    border-color 0.3s var(--ease);
+}
+
+.login:hover {
+  border-color: rgb(239 232 220 / 0.6);
+  background: rgb(239 232 220 / 0.14);
 }
 
 .top p {
@@ -76,6 +132,7 @@
 }
 
 .brand {
+  justify-self: start;
   display: flex;
   align-items: baseline;
   font-size: 1.36em;
@@ -99,6 +156,7 @@
   display: flex;
   align-items: center;
   gap: 0.73em;
+  margin-right: 1.4em;
   font-size: 0.955em;
   font-weight: 600;
   letter-spacing: 0.14em;
@@ -153,20 +211,20 @@
   inset: 0;
 }
 
+/* A true scale. Year ticks are long, the three divisions between them short and even. */
 .tick {
   position: absolute;
   right: 0;
   top: calc(var(--y) * 100%);
-  width: 2.2em;
+  width: 0.7em;
   height: 1px;
-  background: var(--paper);
-  opacity: calc(0.14 + var(--m, 0) * 0.62);
-  transform-origin: right center;
-  transform: scaleX(calc(0.18 + var(--m, 0) * 0.82));
+  background: color-mix(in oklab, var(--key) calc(var(--m, 0) * 100%), var(--paper));
+  opacity: calc(0.22 + var(--m, 0) * 0.7);
 }
 
-.tick[data-year-start] {
-  opacity: calc(0.34 + var(--m, 0) * 0.5);
+.tick[data-major] {
+  width: 1.5em;
+  opacity: calc(0.42 + var(--m, 0) * 0.55);
 }
 
 .playhead {
@@ -196,8 +254,10 @@
 
 .years li {
   position: absolute;
-  right: 3.2em;
+  right: 2.3em;
   top: calc(var(--y) * 100%);
+  /* Centred on its year tick, so the label and the scale read as one mark. */
+  transform: translateY(-50%);
 }
 
 .years button {
