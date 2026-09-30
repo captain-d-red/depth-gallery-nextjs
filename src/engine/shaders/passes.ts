@@ -1,0 +1,263 @@
+import { MAX_LIGHTS, fullscreenVertex, glsl, haze, header, noise, viewRay } from './chunks';
+
+export { fullscreenVertex };
+
+/** The haze itself, rendered at half resolution because scattered light has no fine detail. */
+export const hazeFragment = glsl`${header}
+${noise}
+${haze}
+${viewRay}
+uniform vec3 uAmbient;
+in vec2 vUv;
+out vec4 fragColor;
+
+void main() {
+  vec3 rd = viewRay(vUv);
+  vec2 density = hazeNoise(uCamPos, rd);
+  vec3 col = inscatter(uCamPos, rd, 80.0, density);
+  col += uAmbient * (0.55 + 0.45 * density.y);
+  fragColor = vec4(col, 1.0);
+}
+`;
+
+/** Lays the half-resolution haze behind the scene and writes the far plane. */
+export const backdropFragment = glsl`${header}
+uniform sampler2D uHaze;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(texture(uHaze, vUv).rgb, 1.0);
+}
+`;
+
+export const posterVertex = glsl`${header}
+uniform mat4 modelMatrix;
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+in vec3 position;
+in vec2 uv;
+out vec2 vUv;
+out vec3 vWorld;
+void main() {
+  vUv = uv;
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorld = world.xyz;
+  gl_Position = projectionMatrix * viewMatrix * world;
+}
+`;
+
+/**
+ * A poster is a backlit lightbox. It streams from a low resolution atlas cell to the full
+ * image, dissolves into its own light as the camera passes through it, and sits inside the
+ * same haze as everything else, so distant posters sink into the air.
+ */
+export const posterFragment = glsl`${header}
+${noise}
+${haze}
+uniform vec3 cameraPosition;
+uniform sampler2D uAtlas;
+uniform vec4 uAtlasRect;
+uniform sampler2D uMap;
+uniform float uMapMix;
+uniform float uVisible;
+uniform float uGlow;
+uniform float uHover;
+uniform float uSeed;
+uniform vec3 uEdge;
+in vec2 vUv;
+in vec3 vWorld;
+out vec4 fragColor;
+
+void main() {
+  vec3 lo = texture(uAtlas, uAtlasRect.xy + vUv * uAtlasRect.zw).rgb;
+  vec3 hi = texture(uMap, vUv).rgb;
+  vec3 base = mix(lo, hi, uMapMix);
+
+  // Dissolve. Noise is stretched along the poster so it tears like burning film stock.
+  float n = fbm2(vUv * vec2(3.2, 5.4) + uSeed * 17.0);
+  float threshold = 1.02 - uVisible * 1.1;
+  float k = n - threshold;
+  if (k < 0.0) discard;
+  float burning = clamp((1.0 - uVisible) * 5.0, 0.0, 1.0);
+  float edge = (1.0 - smoothstep(0.0, 0.06, k)) * burning;
+
+  vec3 col = base * uGlow * (1.0 + 0.12 * uHover);
+  // A hairline where the light leaks around the frame.
+  vec2 e = min(vUv, 1.0 - vUv) * vec2(1.0, 1.5);
+  float rim = 1.0 - smoothstep(0.0, 0.008, min(e.x, e.y));
+  col += rim * 0.1 * uGlow;
+  col += edge * uEdge * 5.0;
+
+  vec3 toFrag = vWorld - cameraPosition;
+  float dist = length(toFrag);
+  vec3 rd = toFrag / dist;
+  float transmittance = exp(-uExtinction * dist);
+  col = col * transmittance + inscatter(cameraPosition, rd, dist, hazeNoise(cameraPosition, rd));
+  fragColor = vec4(col, 1.0);
+}
+`;
+
+/** Titles are set large behind their posters, so type and image share one depth. */
+export const titleFragment = glsl`${header}
+uniform vec3 cameraPosition;
+uniform sampler2D uMap;
+uniform vec3 uInk;
+uniform float uOpacity;
+uniform float uExtinction;
+in vec2 vUv;
+in vec3 vWorld;
+out vec4 fragColor;
+void main() {
+  float a = texture(uMap, vUv).a * uOpacity;
+  if (a < 0.002) discard;
+  float dist = length(vWorld - cameraPosition);
+  fragColor = vec4(uInk * exp(-uExtinction * dist * 1.2), a);
+}
+`;
+
+/**
+ * Dust hangs in the haze and only shows where poster light reaches it. Each mote is a quad
+ * that stretches along its own screen motion when the camera moves fast.
+ */
+export const dustVertex = glsl`${header}
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+uniform vec3 cameraPosition;
+uniform vec4 uLightPos[${MAX_LIGHTS}];
+uniform vec4 uLightCol[${MAX_LIGHTS}];
+uniform int uLightCount;
+uniform vec3 uBox;
+uniform float uTime;
+uniform float uVelocity;
+uniform float uPixel;
+uniform vec2 uResolution;
+uniform float uBrightness;
+in vec3 position;
+in vec4 aSeed;
+out vec3 vColor;
+out vec2 vLocal;
+out float vStretch;
+
+void main() {
+  // Motes wrap inside a box that travels with the camera, so the volume never runs out.
+  vec3 cell = fract(aSeed.xyz + vec3(sin(uTime * 0.05 + aSeed.w * 6.28) * 0.01, uTime * 0.0035 * (0.5 + aSeed.w), 0.0));
+  vec3 p;
+  p.x = cameraPosition.x + (cell.x - 0.5) * uBox.x;
+  p.y = cameraPosition.y + (cell.y - 0.5) * uBox.y;
+  float zs = fract(cell.z - cameraPosition.z / uBox.z);
+  p.z = cameraPosition.z + 0.6 - zs * uBox.z;
+
+  vec3 light = vec3(0.0);
+  for (int i = 0; i < ${MAX_LIGHTS}; i++) {
+    if (i >= uLightCount) break;
+    vec4 lp = uLightPos[i];
+    if (p.z < lp.w) continue;
+    vec3 d = lp.xyz - p;
+    light += uLightCol[i].rgb / (dot(d, d) + 0.35);
+  }
+
+  vec4 viewPos = viewMatrix * vec4(p, 1.0);
+  float depth = -viewPos.z;
+  vec4 clip = projectionMatrix * viewPos;
+  // The same mote a moment earlier, which gives the direction of its streak on screen.
+  vec4 prevClip = projectionMatrix * viewMatrix * vec4(p + vec3(0.0, 0.0, uVelocity * 0.9), 1.0);
+  vec2 ndc = clip.xy / clip.w;
+  vec2 prevNdc = prevClip.xy / prevClip.w;
+  vec2 motion = (ndc - prevNdc) * uResolution * 0.5;
+  float len = length(motion);
+  vec2 dir = len > 1e-3 ? motion / len : vec2(0.0, 1.0);
+  vec2 nrm = vec2(-dir.y, dir.x);
+
+  float size = uPixel * (0.9 + 1.6 * aSeed.w) * clamp(2.2 / depth, 0.35, 2.4);
+  float stretch = min(len, 60.0 * uPixel);
+  vec2 offset = nrm * position.x * size + dir * position.y * (size + stretch);
+  clip.xy += offset / uResolution * 2.0 * clip.w;
+  gl_Position = clip;
+
+  float nearFade = smoothstep(0.25, 1.1, depth);
+  float farFade = 1.0 - smoothstep(uBox.z * 0.55, uBox.z * 0.95, depth);
+  vColor = light * uBrightness * nearFade * farFade * (0.35 + 0.65 * aSeed.w) * (size / (size + stretch));
+  vLocal = position.xy;
+  vStretch = stretch / (size + stretch);
+}
+`;
+
+export const dustFragment = glsl`${header}
+in vec3 vColor;
+in vec2 vLocal;
+in float vStretch;
+out vec4 fragColor;
+void main() {
+  vec2 q = vec2(vLocal.x, vLocal.y * mix(1.0, 0.35, vStretch));
+  float r = dot(q, q);
+  float a = exp(-r * 3.2);
+  fragColor = vec4(vColor * a, 1.0);
+}
+`;
+
+/**
+ * Final pass. Fast travel smears the frame toward the vanishing point with a slight split
+ * of the three primaries, then highlights roll off, grain is laid in and the image is
+ * dithered and encoded for the display.
+ */
+export const postFragment = glsl`${header}
+${noise}
+uniform sampler2D uScene;
+uniform vec2 uResolution;
+uniform vec2 uVanish;
+uniform float uSmear;
+uniform float uTime;
+uniform float uExposure;
+uniform float uGrain;
+uniform float uFade;
+in vec2 vUv;
+out vec4 fragColor;
+
+vec3 shoulder(vec3 c) {
+  float m = max(max(c.r, c.g), c.b);
+  const float knee = 0.78;
+  if (m <= knee) return c;
+  float over = m - knee;
+  float mapped = knee + (1.0 - knee) * over / (over + (1.0 - knee));
+  return c * (mapped / m);
+}
+
+vec3 encodeSrgb(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
+void main() {
+  vec2 toCentre = vUv - uVanish;
+  vec3 col = vec3(0.0);
+  if (uSmear > 0.0005) {
+    const int TAPS = 12;
+    float weight = 0.0;
+    float jitter = hash12(gl_FragCoord.xy + fract(uTime) * 91.0);
+    for (int i = 0; i < TAPS; i++) {
+      float t = (float(i) + jitter) / float(TAPS);
+      float s = 1.0 - uSmear * t;
+      float w = 1.0 - t * 0.7;
+      float split = uSmear * 0.16 * t;
+      col.r += texture(uScene, uVanish + toCentre * (s + split)).r * w;
+      col.g += texture(uScene, uVanish + toCentre * s).g * w;
+      col.b += texture(uScene, uVanish + toCentre * (s - split)).b * w;
+      weight += w;
+    }
+    col /= weight;
+  } else {
+    col = texture(uScene, vUv).rgb;
+  }
+
+  col *= uExposure;
+  float vignette = 1.0 - 0.34 * smoothstep(0.35, 1.05, length(toCentre * vec2(uResolution.x / uResolution.y, 1.0)));
+  col *= vignette;
+  col = shoulder(col) * uFade;
+  vec3 srgb = encodeSrgb(col);
+
+  float luma = dot(srgb, vec3(0.2126, 0.7152, 0.0722));
+  float grain = hash12(gl_FragCoord.xy * 0.73 + vec2(fract(uTime * 13.1) * 311.0, fract(uTime * 7.7) * 173.0)) - 0.5;
+  srgb += grain * uGrain * (1.0 - 0.65 * luma);
+  float dither = hash12(gl_FragCoord.xy + 17.0) + hash12(gl_FragCoord.yx + 41.0) - 1.0;
+  srgb += dither / 255.0;
+  f
