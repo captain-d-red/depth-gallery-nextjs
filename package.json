@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint --max-warnings=0",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "format": "prettier --write .",
