@@ -1,4 +1,4 @@
-import { MAX_LIGHTS, fullscreenVertex, glsl, haze, header, noise, release, viewRay } from './chunks';
+import { MAX_LIGHTS, fullscreenVertex, glsl, haze, header, lens, noise, release, viewRay } from './chunks';
 
 export { fullscreenVertex };
 
@@ -20,7 +20,7 @@ void main() {
 }
 `;
 
-/** Lays the half-resolution haze behind the scene and writes the far plane. */
+/** Lays the half-resolution haze behind the scene. */
 export const backdropFragment = glsl`${header}
 uniform sampler2D uHaze;
 in vec2 vUv;
@@ -47,58 +47,175 @@ void main() {
 `;
 
 /**
- * A poster is a backlit lightbox. It streams from a low resolution atlas cell to the full
- * image and sits inside the same haze as everything else, so deeper posters sink into the
- * dark. As the camera walks through it, the release front hands each fragment over to its
- * particle, and the poster breaks into dust.
+ * A poster is a backlit print in a dark, hazy room, seen through a real lens.
+ *
+ * - The quad is padded beyond the print, so an out-of-focus edge spreads past the frame the
+ *   way a defocused rectangle does, instead of staying razor sharp.
+ * - Blur is read from the mip chain at the radius the lens asks for, through a ring of taps,
+ *   so the mip levels never show as blocks.
+ * - A hairline rim runs round the frame in a gradient between the film's two colours.
+ * - Under the pointer, a clear-coat highlight slides across the print.
+ * - As the camera walks through, the release front hands each fragment to its particle.
+ *
+ * Output is premultiplied, so the rim can glow outside the print while the print covers.
  */
 export const posterFragment = glsl`${header}
 ${noise}
 ${haze}
 ${release}
+${lens}
 uniform vec3 cameraPosition;
 uniform sampler2D uAtlas;
 uniform vec4 uAtlasRect;
 uniform sampler2D uMap;
 uniform float uMapMix;
+uniform vec2 uMapSize;
+uniform vec2 uPad;
 uniform float uFar;
 uniform float uRelease;
 uniform float uDirection;
-uniform float uGlow;
 uniform float uHover;
 uniform float uSeed;
+uniform vec3 uKey;
+uniform vec3 uAccent;
+uniform vec2 uSheen;
 in vec2 vUv;
 in vec3 vWorld;
 out vec4 fragColor;
 
+const vec2 RING[8] = vec2[8](
+  vec2(1.0, 0.0), vec2(0.7071, 0.7071), vec2(0.0, 1.0), vec2(-0.7071, 0.7071),
+  vec2(-1.0, 0.0), vec2(-0.7071, -0.7071), vec2(0.0, -1.0), vec2(0.7071, -0.7071)
+);
+
+vec3 print(vec2 uv, float lod) {
+  vec3 lo = textureLod(uAtlas, uAtlasRect.xy + uv * uAtlasRect.zw, 0.0).rgb;
+  vec3 hi = textureLod(uMap, uv, lod).rgb;
+  return mix(lo, hi, uMapMix);
+}
+
 void main() {
-  if (uRelease > 0.0 && releaseAmount(vUv, uSeed, uDirection, uRelease) > 0.0) discard;
-  vec3 lo = texture(uAtlas, uAtlasRect.xy + vUv * uAtlasRect.zw).rgb;
-  vec3 hi = texture(uMap, vUv).rgb;
-  vec3 col = mix(lo, hi, uMapMix) * uGlow * (1.0 + 0.12 * uHover);
-
-  // A hairline where the light leaks around the frame.
-  vec2 e = min(vUv, 1.0 - vUv) * vec2(1.0, 1.5);
-  float rim = 1.0 - smoothstep(0.0, 0.008, min(e.x, e.y));
-  col += rim * 0.1 * uGlow;
-
+  vec2 puv = (vUv - uPad) / (1.0 - 2.0 * uPad);
+  vec2 cuv = clamp(puv, 0.0, 1.0);
   vec3 toFrag = vWorld - cameraPosition;
   float dist = length(toFrag);
   vec3 rd = toFrag / dist;
-  col = col * depthFog(dist) * uFar + inscatter(cameraPosition, rd, dist, hazeNoise(cameraPosition, rd));
-  fragColor = vec4(col, 1.0);
+
+  float coc = circleOfConfusion(dist);
+  vec2 uvPerPx = max(fwidth(puv), vec2(1e-6));
+  vec2 inside2 = (0.5 - abs(puv - 0.5)) / uvPerPx;
+  float inside = min(inside2.x, inside2.y);
+  float spread = max(coc, 0.6);
+  float coverage = smoothstep(-spread, spread, inside);
+
+  // The rim sits just outside the print and blurs with it.
+  float rimWidth = max(0.85, coc * 0.8);
+  float rim = exp(-pow((inside + 0.9) / rimWidth, 2.0)) / (1.0 + coc * 0.22);
+  if (coverage < 0.002 && rim < 0.004) discard;
+  if (uRelease > 0.0 && releaseAmount(cuv, uSeed, uDirection, uRelease) > 0.0) discard;
+
+  vec3 col;
+  if (coc < 0.9) {
+    col = mix(textureLod(uAtlas, uAtlasRect.xy + cuv * uAtlasRect.zw, 0.0).rgb, texture(uMap, cuv).rgb, uMapMix);
+  } else {
+    float lod = log2(max(coc * uMapSize.y * uvPerPx.y * 0.45, 1.0));
+    vec2 r = coc * uvPerPx * 0.6;
+    col = print(cuv, lod) * 2.0;
+    for (int i = 0; i < 8; i++) col += print(clamp(cuv + RING[i] * r, 0.0, 1.0), lod);
+    col /= 10.0;
+  }
+
+  // Clear coat. A broad soft sheen and a tighter core, stretched like a studio softbox.
+  vec2 d = (cuv - uSheen) * vec2(1.0, 0.58);
+  float spec = exp(-dot(d, d) * 7.0) * 0.1 + exp(-dot(d, d) * 70.0) * 0.07;
+  col += spec * uHover * vec3(1.0, 0.98, 0.95);
+
+  float along = clamp(0.5 + (puv.x - puv.y) * 0.5, 0.0, 1.0);
+  vec3 rimColour = mix(uKey, uAccent, along) * 1.35;
+
+  float fog = depthFog(dist) * uFar;
+  vec3 air = inscatter(cameraPosition, rd, dist, hazeNoise(cameraPosition, rd));
+  vec3 lit = col * fog * coverage + rimColour * rim * fog * 0.9 + air * coverage;
+  fragColor = vec4(lit, coverage);
 }
 `;
 
 /**
- * The poster's own dust. One particle per cell of a grid over the poster, coloured from the
- * same image, so the frame stays whole until the release front reaches a cell. Released
- * particles part around the camera path and drift, the way smoke parts for someone walking
- * through it, and they glow a little as they go.
+ * Type set in the scene beside its poster, blurred by the same lens. Wherever the release
+ * front has passed, the glyph is gone and its particle has taken over.
+ */
+export const titleFragment = glsl`${header}
+${noise}
+${release}
+${lens}
+uniform vec3 cameraPosition;
+uniform sampler2D uMap;
+uniform vec2 uMapSize;
+uniform vec3 uInk;
+uniform float uOpacity;
+uniform float uExtinction;
+uniform float uProgress;
+uniform float uSeed;
+uniform float uDirection;
+in vec2 vUv;
+in vec3 vWorld;
+out vec4 fragColor;
+void main() {
+  float dist = length(vWorld - cameraPosition);
+  float coc = circleOfConfusion(dist);
+  float lod = log2(max(coc * uMapSize.y * fwidth(vUv.y) * 0.6, 1.0));
+  float coverage = textureLod(uMap, vUv, lod).r;
+  if (coverage < 0.004) discard;
+  if (releaseAmount(vUv, uSeed, uDirection, uProgress) > 0.0) discard;
+  float a = coverage * uOpacity;
+  fragColor = vec4(uInk * exp(-uExtinction * dist) * a, a);
+}
+`;
+
+/**
+ * Motion shared by every released particle. A grain leaves its surface, is caught in the
+ * wake of the passing camera and swirls round the view axis, spreading outward, while a
+ * noise field breaks the swirl into eddies. Travel eases out, so grains slow as they drift.
+ */
+const wake = glsl`
+vec3 wakeOffset(vec3 world, vec3 camera, float r, vec3 swirl, float seed, float direction, float strength) {
+  float travel = 1.0 - exp(-r * 1.9);
+  vec2 rel = world.xy - camera.xy;
+  float radius = length(rel) + 1e-3;
+  float spin = travel * (0.6 + 0.5 * swirl.x) * 1.25 / (radius + 0.45) * direction * strength;
+  float c = cos(spin);
+  float s = sin(spin);
+  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.3 + 0.35 * seed) * strength);
+  vec3 moved = vec3(camera.xy + rel, world.z);
+  moved += swirl * 0.42 * travel * strength;
+  moved.z += travel * (0.1 + 0.3 * seed) * strength;
+  moved.y += r * r * 0.1;
+  return moved;
+}
+`;
+
+/** A grain is a soft gaussian speck, and a defocused one is a disc with a faint bright rim. */
+const bokehSprite = glsl`
+float spriteShape(vec2 p, float bokeh) {
+  float r2 = dot(p, p);
+  float grain = exp(-r2 * 4.2);
+  float rr = sqrt(r2);
+  float disc = (1.0 - smoothstep(0.82, 1.0, rr)) * (0.72 + 0.28 * smoothstep(0.45, 0.9, rr));
+  return mix(grain, disc, bokeh);
+}
+`;
+
+/**
+ * The poster's own ash. One grain per cell of a grid over the print, coloured from the same
+ * image, so the frame stays whole until the release front reaches a cell. A grain near the
+ * focal plane stays a crisp speck, and a grain that drifts toward the lens opens into a soft
+ * bokeh disc whose light spreads over its whole area, as it would through a real lens.
  */
 export const posterDustVertex = glsl`${header}
 ${noise}
 ${release}
+${lens}
+${wake}
 uniform mat4 modelMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 projectionMatrix;
@@ -112,218 +229,212 @@ uniform vec2 uGrid;
 uniform float uRelease;
 uniform float uDirection;
 uniform float uSeed;
+uniform float uTime;
+uniform vec3 uKey;
 in vec3 position;
 in vec3 aCell;
 out vec3 vColor;
 out vec2 vLocal;
 out float vAlpha;
+out float vBokeh;
 
 void main() {
   vec2 uv = aCell.xy;
   float r = releaseAmount(uv, uSeed, uDirection, uRelease);
-  vec3 color = mix(
+  vLocal = position.xy;
+  if (r <= 0.0 || r >= 1.0) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    vColor = vec3(0.0);
+    vAlpha = 0.0;
+    vBokeh = 0.0;
+    return;
+  }
+  vec3 image = mix(
     textureLod(uAtlas, uAtlasRect.xy + uv * uAtlasRect.zw, 0.0).rgb,
     textureLod(uMap, uv, 2.0).rgb,
     uMapMix
   );
 
   vec4 world = modelMatrix * vec4((uv.x - 0.5) * uPlane.x, (uv.y - 0.5) * uPlane.y, 0.0, 1.0);
-  vec3 q = vec3(uv * vec2(5.0, 7.5), aCell.z * 7.0 + uSeed * 3.0);
+  vec3 q = vec3(uv * vec2(4.0, 6.0), aCell.z * 5.0 + uSeed * 3.0 + uTime * 0.05);
   vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 23.4), valueNoise3(q + 51.9)) - 0.5;
-  vec2 away = world.xy - cameraPosition.xy;
-  away = normalize(away + vec2(1e-4)) * (0.3 + 0.7 * smoothstep(0.0, 0.9, length(away)));
-  float travel = 1.0 - exp(-r * 2.0);
-  world.xyz += vec3(away * 0.5 + swirl.xy * 0.55, -0.25 + swirl.z * 0.35) * travel;
-  world.y += r * r * 0.12;
+  world.xyz = wakeOffset(world.xyz, cameraPosition, r, swirl, aCell.z, uDirection, 1.0);
 
   vec4 view = viewMatrix * world;
-  float cell = uPlane.x / uGrid.x;
-  view.xy += position.xy * cell * (0.95 - r * 0.45);
+  float depth = max(-view.z, 0.05);
+  float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.9 - r * 0.35);
+  float coc = circleOfConfusion(depth);
+  float radiusPx = max(grainPx, coc);
+  view.xy += position.xy * radiusPx * uPxToView * depth;
   gl_Position = projectionMatrix * view;
 
-  // Grains flare briefly as they leave the surface, then cool as they drift off.
-  float flare = 1.0 + 1.4 * r * (1.0 - r) * 4.0 * (0.4 + 0.6 * aCell.z);
-  vColor = color * flare;
-  vLocal = position.xy;
-  float nearFade = smoothstep(0.35, 1.25, -view.z);
-  vAlpha = r > 0.0 && r < 1.0 ? pow(1.0 - r, 1.7) * smoothstep(0.0, 0.04, r) * nearFade * 0.85 : 0.0;
+  // A grain flares as it leaves the surface, catching the film's key light, then cools.
+  float flare = r * (1.0 - r) * 4.0;
+  vec3 colour = mix(image, uKey * 1.4, 0.3 * flare) * (1.0 + 0.9 * flare);
+  float glint = step(0.965, aCell.z) * pow(max(sin(uTime * 6.0 + aCell.z * 91.0), 0.0), 24.0) * 5.0;
+  float energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.05, 1.0);
+  vColor = colour * (1.0 + glint) * energy;
+  vBokeh = smoothstep(1.6, 4.0, coc / max(grainPx, 0.5));
+  float nearFade = smoothstep(0.3, 1.1, depth);
+  vAlpha = pow(1.0 - r, 1.6) * smoothstep(0.0, 0.05, r) * nearFade;
 }
 `;
 
 export const posterDustFragment = glsl`${header}
+${bokehSprite}
 in vec3 vColor;
 in vec2 vLocal;
 in float vAlpha;
+in float vBokeh;
 out vec4 fragColor;
 void main() {
   if (vAlpha <= 0.0) discard;
-  float a = exp(-dot(vLocal, vLocal) * 4.2) * vAlpha;
+  float a = spriteShape(vLocal, vBokeh) * vAlpha;
+  if (a < 0.002) discard;
   fragColor = vec4(vColor * a, 1.0);
-}
-`;
-
-/**
- * Type is set in the scene beside its poster, so it sits in the same air. Wherever the
- * release front has passed, the glyph is gone and its particle has taken over.
- */
-export const titleFragment = glsl`${header}
-${noise}
-${release}
-uniform vec3 cameraPosition;
-uniform sampler2D uMap;
-uniform vec3 uInk;
-uniform float uOpacity;
-uniform float uExtinction;
-uniform float uProgress;
-uniform float uSeed;
-uniform float uDirection;
-in vec2 vUv;
-in vec3 vWorld;
-out vec4 fragColor;
-void main() {
-  float coverage = texture(uMap, vUv).r;
-  if (coverage < 0.004) discard;
-  float released = releaseAmount(vUv, uSeed, uDirection, uProgress);
-  if (released > 0.0) discard;
-  float dist = length(vWorld - cameraPosition);
-  fragColor = vec4(uInk * exp(-uExtinction * dist), coverage * uOpacity);
 }
 `;
 
 /**
  * One particle per sampled glyph pixel. It waits invisibly until the release front reaches
- * it, then puffs away from the page, rising and spreading like breath in cold air.
+ * it, then puffs away in the same wake as the poster ash, lighter and quicker.
  */
 export const titleDustVertex = glsl`${header}
 ${noise}
 ${release}
+${lens}
+${wake}
 uniform mat4 modelMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 projectionMatrix;
+uniform vec3 cameraPosition;
 uniform vec2 uPlane;
 uniform float uProgress;
 uniform float uSeed;
 uniform float uDirection;
 uniform float uPixel;
-uniform vec2 uResolution;
+uniform float uTime;
 in vec3 position;
 in vec4 aPoint;
 out vec2 vLocal;
 out float vAlpha;
+out float vBokeh;
 
 void main() {
   float r = releaseAmount(aPoint.xy, uSeed, uDirection, uProgress);
-  vec3 local = vec3((aPoint.x - 0.5) * uPlane.x, (aPoint.y - 0.5) * uPlane.y, 0.0);
-  vec3 q = vec3(aPoint.xy * vec2(7.0, 3.5), aPoint.z * 9.0 + uSeed);
-  vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 19.1), valueNoise3(q + 41.7)) - 0.5;
-  float travel = 1.0 - exp(-r * 2.4);
-  vec3 drift = vec3(-uDirection * 0.28 + swirl.x * 0.75, 0.22 + swirl.y * 0.55, 0.3 + swirl.z * 0.9);
-  local += drift * travel * 0.85 + vec3(0.0, r * r * 0.22, 0.0);
-  vec4 clip = projectionMatrix * viewMatrix * modelMatrix * vec4(local, 1.0);
-  float size = uPixel * aPoint.w * (1.0 + r * 2.4);
-  clip.xy += position.xy * size / uResolution * 2.0 * clip.w;
-  gl_Position = clip;
   vLocal = position.xy;
-  vAlpha = r > 0.0 && r < 1.0 ? pow(1.0 - r, 1.6) * smoothstep(0.0, 0.06, r) : 0.0;
+  if (r <= 0.0 || r >= 1.0) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    vAlpha = 0.0;
+    vBokeh = 0.0;
+    return;
+  }
+  vec4 world = modelMatrix * vec4((aPoint.x - 0.5) * uPlane.x, (aPoint.y - 0.5) * uPlane.y, 0.0, 1.0);
+  vec3 q = vec3(aPoint.xy * vec2(7.0, 3.5), aPoint.z * 9.0 + uSeed + uTime * 0.06);
+  vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 19.1), valueNoise3(q + 41.7)) - 0.5;
+  world.xyz = wakeOffset(world.xyz, cameraPosition, r, swirl, aPoint.z, -uDirection, 0.75);
+
+  vec4 view = viewMatrix * world;
+  float depth = max(-view.z, 0.05);
+  float grainPx = uPixel * aPoint.w * (1.0 + r * 1.6);
+  float coc = circleOfConfusion(depth);
+  float radiusPx = max(grainPx, coc);
+  view.xy += position.xy * radiusPx * uPxToView * depth;
+  gl_Position = projectionMatrix * view;
+  vBokeh = smoothstep(1.6, 4.0, coc / max(grainPx, 0.5));
+  float energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.05, 1.0);
+  vAlpha = pow(1.0 - r, 1.6) * smoothstep(0.0, 0.06, r) * energy;
 }
 `;
 
 export const titleDustFragment = glsl`${header}
+${bokehSprite}
 uniform vec3 uInk;
 uniform float uOpacity;
 in vec2 vLocal;
 in float vAlpha;
+in float vBokeh;
 out vec4 fragColor;
 void main() {
   if (vAlpha <= 0.0) discard;
-  float a = exp(-dot(vLocal, vLocal) * 3.0) * vAlpha * uOpacity;
+  float a = spriteShape(vLocal, vBokeh) * vAlpha * uOpacity;
+  if (a < 0.002) discard;
   fragColor = vec4(uInk * a, 1.0);
 }
 `;
 
-/**
- * Dust hangs in the haze and only shows where poster light reaches it. Each mote is a quad
- * that stretches along its own screen motion when the camera moves fast.
- */
-export const dustVertex = glsl`${header}
+export const floorVertex = glsl`${header}
+uniform mat4 modelMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 projectionMatrix;
-uniform vec3 cameraPosition;
-uniform vec4 uLightPos[${MAX_LIGHTS}];
-uniform vec4 uLightCol[${MAX_LIGHTS}];
-uniform int uLightCount;
-uniform vec3 uBox;
-uniform float uTime;
-uniform float uVelocity;
-uniform float uPixel;
-uniform vec2 uResolution;
-uniform float uBrightness;
 in vec3 position;
-in vec4 aSeed;
-out vec3 vColor;
-out vec2 vLocal;
-out float vStretch;
-
+out vec3 vWorld;
 void main() {
-  // Motes wrap inside a box that travels with the camera, so the volume never runs out.
-  vec3 cell = fract(aSeed.xyz + vec3(sin(uTime * 0.05 + aSeed.w * 6.28) * 0.01, uTime * 0.0035 * (0.5 + aSeed.w), 0.0));
-  vec3 p;
-  p.x = cameraPosition.x + (cell.x - 0.5) * uBox.x;
-  p.y = cameraPosition.y + (cell.y - 0.5) * uBox.y;
-  float zs = fract(cell.z - cameraPosition.z / uBox.z);
-  p.z = cameraPosition.z + 0.6 - zs * uBox.z;
-
-  vec3 light = vec3(0.0);
-  for (int i = 0; i < ${MAX_LIGHTS}; i++) {
-    if (i >= uLightCount) break;
-    vec4 lp = uLightPos[i];
-    if (p.z < lp.w) continue;
-    vec3 d = lp.xyz - p;
-    light += uLightCol[i].rgb / (dot(d, d) + 0.35);
-  }
-
-  vec4 viewPos = viewMatrix * vec4(p, 1.0);
-  float depth = -viewPos.z;
-  vec4 clip = projectionMatrix * viewPos;
-  // The same mote a moment earlier, which gives the direction of its streak on screen.
-  vec4 prevClip = projectionMatrix * viewMatrix * vec4(p + vec3(0.0, 0.0, uVelocity * 0.9), 1.0);
-  vec2 ndc = clip.xy / clip.w;
-  vec2 prevNdc = prevClip.xy / prevClip.w;
-  vec2 motion = (ndc - prevNdc) * uResolution * 0.5;
-  float len = length(motion);
-  vec2 dir = len > 1e-3 ? motion / len : vec2(0.0, 1.0);
-  vec2 nrm = vec2(-dir.y, dir.x);
-
-  float size = uPixel * (0.9 + 1.6 * aSeed.w) * clamp(2.2 / depth, 0.35, 2.4);
-  float stretch = min(len, 60.0 * uPixel);
-  vec2 offset = nrm * position.x * size + dir * position.y * (size + stretch);
-  clip.xy += offset / uResolution * 2.0 * clip.w;
-  gl_Position = clip;
-
-  float nearFade = smoothstep(0.25, 1.1, depth);
-  float farFade = 1.0 - smoothstep(uBox.z * 0.55, uBox.z * 0.95, depth);
-  vColor = light * uBrightness * nearFade * farFade * (0.35 + 0.65 * aSeed.w) * (size / (size + stretch));
-  vLocal = position.xy;
-  vStretch = stretch / (size + stretch);
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorld = world.xyz;
+  gl_Position = projectionMatrix * viewMatrix * world;
 }
 `;
 
-export const dustFragment = glsl`${header}
-in vec3 vColor;
-in vec2 vLocal;
-in float vStretch;
+/**
+ * A dark polished floor that grounds the room.
+ *
+ * - Reflections come from a mirrored render of the posters, read in screen space and smeared
+ *   mostly vertically, the way polished stone stretches a reflection toward the viewer.
+ * - A Schlick Fresnel term makes the floor mirror-like at grazing angles and matte underfoot.
+ * - Each poster light casts a Lambertian pool of its colour onto the floor in front of it.
+ * - Slow low-frequency noise varies the roughness, so the sheen is never uniform plastic.
+ */
+export const floorFragment = glsl`${header}
+${noise}
+${haze}
+uniform vec3 cameraPosition;
+uniform sampler2D uReflection;
+uniform vec2 uResolution;
+uniform float uReflect;
+uniform float uAlbedo;
+in vec3 vWorld;
 out vec4 fragColor;
+
 void main() {
-  vec2 q = vec2(vLocal.x, vLocal.y * mix(1.0, 0.35, vStretch));
-  float r = dot(q, q);
-  float a = exp(-r * 3.2);
-  fragColor = vec4(vColor * a, 1.0);
+  vec3 toFrag = vWorld - cameraPosition;
+  float dist = length(toFrag);
+  vec3 rd = toFrag / dist;
+  vec2 suv = gl_FragCoord.xy / uResolution;
+
+  float rough = 0.45 + 0.55 * valueNoise2(vWorld.xz * vec2(0.7, 0.45) + 3.1);
+  vec2 wobble = (vec2(valueNoise2(vWorld.xz * 11.0), valueNoise2(vWorld.xz * 11.0 + 5.7)) - 0.5) * 0.004;
+  vec3 reflection = vec3(0.0);
+  float weight = 0.0;
+  for (int i = -5; i <= 5; i++) {
+    float t = float(i) / 5.0;
+    float w = exp(-t * t * 2.2);
+    reflection += texture(uReflection, suv + wobble + vec2(t * 0.003, t * 0.034) * rough).rgb * w;
+    weight += w;
+  }
+  reflection /= weight;
+  float cosView = clamp(-rd.y, 0.0, 1.0);
+  float fresnel = 0.04 + 0.96 * pow(1.0 - cosView, 5.0);
+
+  vec3 irradiance = vec3(0.0);
+  for (int i = 0; i < ${MAX_LIGHTS}; i++) {
+    if (i >= uLightCount) break;
+    vec4 lp = uLightPos[i];
+    vec3 l = lp.xyz - vWorld;
+    float d2 = dot(l, l);
+    float front = smoothstep(-0.08, 0.4, vWorld.z - lp.w);
+    irradiance += uLightCol[i].rgb * front * max(l.y, 0.0) / (sqrt(d2) * (d2 + 0.3));
+  }
+
+  vec3 col = irradiance * uAlbedo + reflection * fresnel * uReflect;
+  col = col * depthFog(dist) + inscatter(cameraPosition, rd, dist, hazeNoise(cameraPosition, rd));
+  fragColor = vec4(col, 1.0);
 }
 `;
 
 /**
  * Final pass. Fast travel smears the frame toward the vanishing point with a slight split
- * of the three primaries, then highlights roll off, grain is laid in and the image is
+ * of the three primaries, then highlights roll off, a fine grain is laid in and the image is
  * dithered and encoded for the display.
  */
 export const postFragment = glsl`${header}

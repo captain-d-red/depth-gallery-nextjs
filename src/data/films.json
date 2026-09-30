@@ -28,45 +28,45 @@
       "atlasIndex": 0,
       "light": [
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           1
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.693
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.222
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.257
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.253
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.271
         ]
       ],
       "palette": {
-        "key": "#ada397",
-        "accent": "#ada397"
+        "key": "#b4a99c",
+        "accent": "#b4a99c"
       },
       "trailer": {
         "id": "5jaI1XOB-bs",
@@ -130,8 +130,8 @@
         ]
       ],
       "palette": {
-        "key": "#6fa0b9",
-        "accent": "#6fa0b9"
+        "key": "#55aad1",
+        "accent": "#55aad1"
       },
       "trailer": {
         "id": "YoHD9XEInc0",
@@ -195,8 +195,8 @@
         ]
       ],
       "palette": {
-        "key": "#a19c51",
-        "accent": "#c380a7"
+        "key": "#aaa238",
+        "accent": "#d57db1"
       },
       "trailer": {
         "id": "KBiOF3y1W0Y",
@@ -259,8 +259,8 @@
         ]
       ],
       "palette": {
-        "key": "#e2754f",
-        "accent": "#e2754f"
+        "key": "#fc6b36",
+        "accent": "#fc6b36"
       },
       "trailer": {
         "id": "J9DlV9qwtF0",
@@ -324,8 +324,8 @@
         ]
       ],
       "palette": {
-        "key": "#8d95c3",
-        "accent": "#8d95c3"
+        "key": "#8e99dc",
+        "accent": "#8e99dc"
       },
       "trailer": {
         "id": "6kw1UVovByw",
@@ -389,8 +389,8 @@
         ]
       ],
       "palette": {
-        "key": "#f85a69",
-        "accent": "#f85a69"
+        "key": "#ff616f",
+        "accent": "#ff616f"
       },
       "trailer": {
         "id": "dJTU48_yghs",
@@ -453,8 +453,8 @@
         ]
       ],
       "palette": {
-        "key": "#759dbe",
-        "accent": "#759dbe"
+        "key": "#65a5d8",
+        "accent": "#65a5d8"
       },
       "trailer": {
         "id": "k0ijEEivCbg",
@@ -517,8 +517,8 @@
         ]
       ],
       "palette": {
-        "key": "#ef6563",
-        "accent": "#ef6563"
+        "key": "#ff6362",
+        "accent": "#ff6362"
       },
       "trailer": {
         "id": "PI8XBKb6DQk",
@@ -581,8 +581,8 @@
         ]
       ],
       "palette": {
-        "key": "#ea6b64",
-        "accent": "#ea6b64"
+        "key": "#ff635e",
+        "accent": "#ff635e"
       },
       "trailer": {
         "id": "vw61gCe2oqI",
@@ -609,45 +609,45 @@
       "atlasIndex": 9,
       "light": [
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ]
       ],
       "palette": {
-        "key": "#ada397",
-        "accent": "#ada397"
+        "key": "#b4a99c",
+        "accent": "#b4a99c"
       },
       "trailer": {
         "id": "dXQWzwGcACc",
@@ -711,8 +711,8 @@
         ]
       ],
       "palette": {
-        "key": "#719ad4",
-        "accent": "#719ad4"
+        "key": "#6aa0ec",
+        "accent": "#6aa0ec"
       },
       "trailer": {
         "id": "2XltzyLcu0g",
@@ -775,8 +775,8 @@
         ]
       ],
       "palette": {
-        "key": "#bb8b7f",
-        "accent": "#bb8b7f"
+        "key": "#d58775",
+        "accent": "#d58775"
       },
       "trailer": {
         "id": "ej3ioOneTy8",
@@ -840,8 +840,8 @@
         ]
       ],
       "palette": {
-        "key": "#a3977a",
-        "accent": "#a3977a"
+        "key": "#b89b51",
+        "accent": "#b89b51"
       },
       "trailer": {
         "id": "7XLQ1bkSLDo",
@@ -905,8 +905,8 @@
         ]
       ],
       "palette": {
-        "key": "#b49600",
-        "accent": "#b49600"
+        "key": "#bb9c00",
+        "accent": "#bb9c00"
       },
       "trailer": {
         "id": "b_4nzm9ICuo",
@@ -970,8 +970,8 @@
         ]
       ],
       "palette": {
-        "key": "#8799b9",
-        "accent": "#8799b9"
+        "key": "#7d9edd",
+        "accent": "#7d9edd"
       },
       "trailer": {
         "id": "LoebZZ8K5N0",
@@ -1035,8 +1035,8 @@
         ]
       ],
       "palette": {
-        "key": "#af936e",
-        "accent": "#af936e"
+        "key": "#c39554",
+        "accent": "#c39554"
       },
       "trailer": {
         "id": "oGI9hSl0q-w",
@@ -1100,8 +1100,8 @@
         ]
       ],
       "palette": {
-        "key": "#759fb7",
-        "accent": "#759fb7"
+        "key": "#5aa8d3",
+        "accent": "#5aa8d3"
       },
       "trailer": {
         "id": "dyHweFaQw8s",
@@ -1165,8 +1165,8 @@
         ]
       ],
       "palette": {
-        "key": "#39a3dd",
-        "accent": "#39a3dd"
+        "key": "#00aaf2",
+        "accent": "#00aaf2"
       },
       "trailer": {
         "id": "RuyHIkXdYf8",
@@ -1229,8 +1229,8 @@
         ]
       ],
       "palette": {
-        "key": "#ee6379",
-        "accent": "#ee6379"
+        "key": "#ff5f7a",
+        "accent": "#ff5f7a"
       },
       "trailer": {
         "id": "zTvJJnoWIPk",
@@ -1294,8 +1294,8 @@
         ]
       ],
       "palette": {
-        "key": "#c5857e",
-        "accent": "#c5857e"
+        "key": "#d7857b",
+        "accent": "#d7857b"
       },
       "trailer": {
         "id": "Div0iP65aZo",
@@ -1358,8 +1358,8 @@
         ]
       ],
       "palette": {
-        "key": "#f66241",
-        "accent": "#f66241"
+        "key": "#ff6644",
+        "accent": "#ff6644"
       },
       "trailer": {
         "id": "gCcx85zbxz4",
@@ -1423,8 +1423,8 @@
         ]
       ],
       "palette": {
-        "key": "#e7722f",
-        "accent": "#928be2"
+        "key": "#fa6e00",
+        "accent": "#988cff"
       },
       "trailer": {
         "id": "Rvr68u6k5sI",
@@ -1451,45 +1451,45 @@
       "atlasIndex": 22,
       "light": [
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ]
       ],
       "palette": {
-        "key": "#ada397",
-        "accent": "#ada397"
+        "key": "#b4a99c",
+        "accent": "#b4a99c"
       },
       "trailer": {
         "id": "DzfpyUB60YY",
@@ -1553,8 +1553,8 @@
         ]
       ],
       "palette": {
-        "key": "#75a0b1",
-        "accent": "#75a0b1"
+        "key": "#4eaccc",
+        "accent": "#4eaccc"
       },
       "trailer": {
         "id": "XRtZUkAR2u4",
@@ -1618,8 +1618,8 @@
         ]
       ],
       "palette": {
-        "key": "#d37c77",
-        "accent": "#d37c77"
+        "key": "#e97772",
+        "accent": "#e97772"
       },
       "trailer": {
         "id": "wb49-oV0F78",
@@ -1683,8 +1683,8 @@
         ]
       ],
       "palette": {
-        "key": "#ea6c5e",
-        "accent": "#b79343"
+        "key": "#ff6457",
+        "accent": "#c69615"
       },
       "trailer": {
         "id": "g4Hbz2jLxvQ",
@@ -1748,8 +1748,8 @@
         ]
       ],
       "palette": {
-        "key": "#eb6a68",
-        "accent": "#ba9307"
+        "key": "#ff6363",
+        "accent": "#c29800"
       },
       "trailer": {
         "id": "qGqiHJTsRkQ",
@@ -1813,8 +1813,8 @@
         ]
       ],
       "palette": {
-        "key": "#e57063",
-        "accent": "#ab9666"
+        "key": "#ff6457",
+        "accent": "#b99a51"
       },
       "trailer": {
         "id": "zAGVQLHvwOY",
@@ -1878,8 +1878,8 @@
         ]
       ],
       "palette": {
-        "key": "#6ca976",
-        "accent": "#6ca976"
+        "key": "#61b470",
+        "accent": "#61b470"
       },
       "trailer": {
         "id": "5xH0HfJHsaY",
@@ -1943,8 +1943,8 @@
         ]
       ],
       "palette": {
-        "key": "#769bc9",
-        "accent": "#d08533"
+        "key": "#70a2de",
+        "accent": "#e18500"
       },
       "trailer": {
         "id": "YqNYrYUiMfg",
@@ -2008,8 +2008,8 @@
         ]
       ],
       "palette": {
-        "key": "#8f86fa",
-        "accent": "#8f86fa"
+        "key": "#958dff",
+        "accent": "#958dff"
       },
       "trailer": {
         "id": "TcMBFSGVi1c",
@@ -2073,8 +2073,8 @@
         ]
       ],
       "palette": {
-        "key": "#619be2",
-        "accent": "#619be2"
+        "key": "#52a0fe",
+        "accent": "#52a0fe"
       },
       "trailer": {
         "id": "xOsLIiBStEs",
@@ -2137,8 +2137,8 @@
         ]
       ],
       "palette": {
-        "key": "#e47258",
-        "accent": "#e47258"
+        "key": "#ff6745",
+        "accent": "#ff6745"
       },
       "trailer": {
         "id": "RbIxYm3mKzI",
@@ -2202,8 +2202,8 @@
         ]
       ],
       "palette": {
-        "key": "#e07746",
-        "accent": "#e07746"
+        "key": "#fa6e21",
+        "accent": "#fa6e21"
       },
       "trailer": {
         "id": "_ak5dFt8Ar0",
@@ -2266,8 +2266,8 @@
         ]
       ],
       "palette": {
-        "key": "#72a3a2",
-        "accent": "#72a3a2"
+        "key": "#41b2b1",
+        "accent": "#41b2b1"
       },
       "trailer": {
         "id": "n9xhJrPXop4",
@@ -2331,8 +2331,8 @@
         ]
       ],
       "palette": {
-        "key": "#e1736c",
-        "accent": "#e1736c"
+        "key": "#fa6863",
+        "accent": "#fa6863"
       },
       "trailer": {
         "id": "wxN1T1uxQ2g",
@@ -2395,8 +2395,8 @@
         ]
       ],
       "palette": {
-        "key": "#e76e5e",
-        "accent": "#e76e5e"
+        "key": "#ff6553",
+        "accent": "#ff6553"
       },
       "trailer": {
         "id": "BcDK7lkzzsU",
@@ -2459,8 +2459,8 @@
         ]
       ],
       "palette": {
-        "key": "#e47442",
-        "accent": "#e47442"
+        "key": "#ff6914",
+        "accent": "#ff6914"
       },
       "trailer": {
         "id": "AJmEaYsLYB8",
@@ -2523,8 +2523,8 @@
         ]
       ],
       "palette": {
-        "key": "#ca8654",
-        "accent": "#ca8654"
+        "key": "#de853d",
+        "accent": "#de853d"
       },
       "trailer": {
         "id": "BRb4U99OU80",
@@ -2550,45 +2550,45 @@
       "atlasIndex": 39,
       "light": [
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           1
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.22
         ]
       ],
       "palette": {
-        "key": "#ada397",
-        "accent": "#ada397"
+        "key": "#b4a99c",
+        "accent": "#b4a99c"
       },
       "trailer": {
         "id": "aLAKJu9aJys",
@@ -2652,8 +2652,8 @@
         ]
       ],
       "palette": {
-        "key": "#c08d4a",
-        "accent": "#c08d4a"
+        "key": "#d28f29",
+        "accent": "#d28f29"
       },
       "trailer": {
         "id": "oMSdFM12hOw",
@@ -2716,8 +2716,8 @@
         ]
       ],
       "palette": {
-        "key": "#b0964a",
-        "accent": "#b0964a"
+        "key": "#bd9a29",
+        "accent": "#bd9a29"
       },
       "trailer": {
         "id": "qSqVVswa420",
@@ -2780,8 +2780,8 @@
         ]
       ],
       "palette": {
-        "key": "#5b97f5",
-        "accent": "#5b97f5"
+        "key": "#5e9eff",
+        "accent": "#5e9eff"
       },
       "trailer": {
         "id": "gj5ibYSz8C0",
@@ -2844,8 +2844,8 @@
         ]
       ],
       "palette": {
-        "key": "#7199db",
-        "accent": "#7199db"
+        "key": "#699ef6",
+        "accent": "#699ef6"
       },
       "trailer": {
         "id": "In8fuzj3gck",
@@ -2909,8 +2909,8 @@
         ]
       ],
       "palette": {
-        "key": "#7d98cf",
-        "accent": "#cf825c"
+        "key": "#7b9de5",
+        "accent": "#e4804b"
       },
       "trailer": {
         "id": "IE8HIsIrq4o",
@@ -2974,8 +2974,8 @@
         ]
       ],
       "palette": {
-        "key": "#7997d8",
-        "accent": "#cf844f"
+        "key": "#759cf1",
+        "accent": "#e48135"
       },
       "trailer": {
         "id": "RqrXhwS33yc",
@@ -3038,8 +3038,8 @@
         ]
       ],
       "palette": {
-        "key": "#8896c8",
-        "accent": "#8896c8"
+        "key": "#899add",
+        "accent": "#899add"
       },
       "trailer": {
         "id": "1f65r8BUZ5I",
@@ -3103,8 +3103,8 @@
         ]
       ],
       "palette": {
-        "key": "#ee6763",
-        "accent": "#ee6763"
+        "key": "#ff6360",
+        "accent": "#ff6360"
       },
       "trailer": {
         "id": "avz06PDqDbM",
@@ -3167,8 +3167,8 @@
         ]
       ],
       "palette": {
-        "key": "#e27364",
-        "accent": "#e27364"
+        "key": "#fb6957",
+        "accent": "#fb6957"
       },
       "trailer": {
         "id": "cMVBi_e8o-Y",
@@ -3232,8 +3232,8 @@
         ]
       ],
       "palette": {
-        "key": "#ba8b81",
-        "accent": "#ba8b81"
+        "key": "#d58777",
+        "accent": "#d58777"
       },
       "trailer": {
         "id": "nAYKaslCXPc",
@@ -3297,8 +3297,8 @@
         ]
       ],
       "palette": {
-        "key": "#ee694a",
-        "accent": "#ee694a"
+        "key": "#ff6642",
+        "accent": "#ff6642"
       },
       "trailer": {
         "id": "cqGjhVJWtEg",
@@ -3361,8 +3361,8 @@
         ]
       ],
       "palette": {
-        "key": "#e47350",
-        "accent": "#e47350"
+        "key": "#ff6837",
+        "accent": "#ff6837"
       },
       "trailer": {
         "id": "bK6ldnjE3Y0",
@@ -3425,8 +3425,8 @@
         ]
       ],
       "palette": {
-        "key": "#d08068",
-        "accent": "#d08068"
+        "key": "#e67d5d",
+        "accent": "#e67d5d"
       },
       "trailer": {
         "id": "qEVUtrk8_B4",
@@ -3489,8 +3489,8 @@
         ]
       ],
       "palette": {
-        "key": "#80a09f",
-        "accent": "#80a09f"
+        "key": "#41b2b1",
+        "accent": "#41b2b1"
       },
       "trailer": {
         "id": "5S7FR_HCg9g",
@@ -3553,8 +3553,8 @@
         ]
       ],
       "palette": {
-        "key": "#77a0ab",
-        "accent": "#77a0ab"
+        "key": "#46aec5",
+        "accent": "#46aec5"
       },
       "trailer": {
         "id": "ex3C1-5Dhb8",
@@ -3618,8 +3618,8 @@
         ]
       ],
       "palette": {
-        "key": "#7c9eb2",
-        "accent": "#7c9eb2"
+        "key": "#59a9d3",
+        "accent": "#59a9d3"
       },
       "trailer": {
         "id": "RlbR5N6veqw",
@@ -3682,8 +3682,8 @@
         ]
       ],
       "palette": {
-        "key": "#b68c89",
-        "accent": "#b68c89"
+        "key": "#d68580",
+        "accent": "#d68580"
       },
       "trailer": {
         "id": "LNlrGhBpYjc",
@@ -3746,8 +3746,8 @@
         ]
       ],
       "palette": {
-        "key": "#f1645d",
-        "accent": "#5e9ae7"
+        "key": "#ff645c",
+        "accent": "#54a0ff"
       },
       "trailer": {
         "id": "LEjhY15eCx0",
@@ -3810,8 +3810,8 @@
         ]
       ],
       "palette": {
-        "key": "#ea6b61",
-        "accent": "#be901d"
+        "key": "#ff645a",
+        "accent": "#c89500"
       },
       "trailer": {
         "id": "73_1biulkYk",
@@ -3874,8 +3874,8 @@
         ]
       ],
       "palette": {
-        "key": "#fa5b4c",
-        "accent": "#fa5b4c"
+        "key": "#ff6555",
+        "accent": "#ff6555"
       },
       "trailer": {
         "id": "OzY2r2JXsDM",
@@ -3939,8 +3939,8 @@
         ]
       ],
       "palette": {
-        "key": "#f95c4d",
-        "accent": "#f95c4d"
+        "key": "#ff6554",
+        "accent": "#ff6554"
       },
       "trailer": {
         "id": "ou9t6wXJkjE",
@@ -4004,8 +4004,8 @@
         ]
       ],
       "palette": {
-        "key": "#ee6a40",
-        "accent": "#ee6a40"
+        "key": "#ff6735",
+        "accent": "#ff6735"
       },
       "trailer": {
         "id": "Way9Dexny3w",
@@ -4069,8 +4069,8 @@
         ]
       ],
       "palette": {
-        "key": "#e07847",
-        "accent": "#e07847"
+        "key": "#f96f23",
+        "accent": "#f96f23"
       },
       "trailer": {
         "id": "XJMuhwVlca4",
@@ -4134,8 +4134,8 @@
         ]
       ],
       "palette": {
-        "key": "#c28b59",
-        "accent": "#c28b59"
+        "key": "#d38c45",
+        "accent": "#d38c45"
       },
       "trailer": {
         "id": "4rgYUipGJNo",
@@ -4161,45 +4161,45 @@
       "atlasIndex": 64,
       "light": [
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           1
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.882
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.606
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.479
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.397
         ],
         [
-          0.567,
-          0.292,
-          0.092,
+          0.457,
+          0.395,
+          0.334,
           0.326
         ]
       ],
       "palette": {
-        "key": "#ada397",
-        "accent": "#ada397"
+        "key": "#b4a99c",
+        "accent": "#b4a99c"
       },
       "trailer": {
         "id": "nulvWqYUM8k",
@@ -4263,8 +4263,8 @@
         ]
       ],
       "palette": {
-        "key": "#bd902b",
-        "accent": "#bd902b"
+        "key": "#c99500",
+        "accent": "#c99500"
       },
       "trailer": {
         "id": "67vbA5ZJdKQ",
@@ -4327,8 +4327,8 @@
         ]
       ],
       "palette": {
-        "key": "#68ae36",
-        "accent": "#68ae36"
+        "key": "#62b810",
+        "accent": "#62b810"
       },
       "trailer": {
         "id": "aDyQxtg0V2w",
@@ -4391,8 +4391,8 @@
         ]
       ],
       "palette": {
-        "key": "#60a5b2",
-        "accent": "#60a5b2"
+        "key": "#44afc2",
+        "accent": "#44afc2"
       },
       "trailer": {
         "id": "82WW9dVbglI",
@@ -4455,8 +4455,8 @@
         ]
       ],
       "palette": {
-        "key": "#d77977",
-        "accent": "#d77977"
+        "key": "#ee7372",
+        "accent": "#ee7372"
       },
       "trailer": {
         "id": "OpThntO9ixc",
@@ -4519,8 +4519,8 @@
         ]
       ],
       "palette": {
-        "key": "#f85f3d",
-        "accent": "#f85f3d"
+        "key": "#ff6644",
+        "accent": "#ff6644"
       },
       "trailer": {
         "id": "bKGxHflevuk",
@@ -4583,8 +4583,8 @@
         ]
       ],
       "palette": {
-        "key": "#bf9013",
-        "accent": "#bf9013"
+        "key": "#c89500",
+        "accent": "#c89500"
       },
       "trailer": {
         "id": "osYpGSz_0i4",
@@ -4648,8 +4648,8 @@
         ]
       ],
       "palette": {
-        "key": "#7d8ef7",
-        "accent": "#cd6ece"
+        "key": "#8394ff",
+        "accent": "#dc69de"
       },
       "trailer": {
         "id": "AzCAwdp1uIQ",

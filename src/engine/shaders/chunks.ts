@@ -170,6 +170,26 @@ float releaseAmount(vec2 uv, float seed, float direction, float progress) {
 }
 `;
 
+/**
+ * A thin lens focused at `uFocus`. The blur circle grows with how far a surface sits from the
+ * focal plane, measured as a ratio, so a poster twice the focus distance away is blurred half
+ * as much as one at infinity. `uAperture` is that infinite-distance radius in device pixels.
+ *
+ *   coc(d) = aperture * | 1 - focus / d |
+ *
+ * `uPxToView` converts a pixel radius to a view-space size at unit depth, which lets sprites
+ * grow into bokeh discs of the right size.
+ */
+export const lens = glsl`
+uniform float uFocus;
+uniform float uAperture;
+uniform float uPxToView;
+
+float circleOfConfusion(float depth) {
+  return min(uAperture * abs(1.0 - uFocus / max(depth, 1e-3)), uAperture * 1.8);
+}
+`;
+
 /** Full-screen triangle, so every screen pass shades each pixel once without a diagonal seam. */
 export const fullscreenVertex = glsl`${header}
 in vec3 position;

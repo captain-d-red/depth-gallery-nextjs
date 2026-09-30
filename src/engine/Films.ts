@@ -1,5 +1,8 @@
 import {
+  AdditiveBlending,
+  CustomBlending,
   DataTexture,
+  DoubleSide,
   GLSL3,
   Group,
   InstancedBufferAttribute,
@@ -7,14 +10,15 @@ import {
   LinearFilter,
   LinearMipmapLinearFilter,
   Mesh,
-  NormalBlending,
-  AdditiveBlending,
+  OneFactor,
+  OneMinusSrcAlphaFactor,
   PlaneGeometry,
   RawShaderMaterial,
   RedFormat,
   SRGBColorSpace,
   Texture,
   UnsignedByteType,
+  Vector2,
   Vector3,
   type IUniform,
   type WebGLRenderer,
@@ -22,6 +26,7 @@ import {
 import { LIGHT_COLUMNS, LIGHT_ROWS, type Catalogue, type Film } from '@/data/catalogue';
 import { hexToLinear, type Vec3 } from '@/lib/color';
 import { clamp, damp, lerp, smoothstep } from '@/lib/math';
+import { createQuadGeometry } from './gl';
 import { POSTER_HEIGHT, placeFilm, type Placement } from './layout';
 import {
   posterDustFragment,
@@ -33,9 +38,8 @@ import {
   titleFragment,
 } from './shaders/passes';
 import { TITLE_PLANE, drawTitleArt, type TitleAlign } from './TitleArt';
-import { createQuadGeometry } from './gl';
 
-/** Uniform objects shared by reference between the haze pass and every poster. */
+/** Uniform objects shared by reference between the haze pass, the floor and every poster. */
 export interface HazeUniforms {
   readonly uLightPos: IUniform<Float32Array>;
   readonly uLightCol: IUniform<Float32Array>;
@@ -48,12 +52,27 @@ export interface HazeUniforms {
   readonly uTime: IUniform<number>;
 }
 
+/** The lens every surface is seen through, shared by reference like the haze. */
+export interface LensUniforms {
+  readonly uFocus: IUniform<number>;
+  readonly uAperture: IUniform<number>;
+  readonly uPxToView: IUniform<number>;
+}
+
 export type LayoutMode = 'spread' | 'stack';
+
+/** A pointer hit on a poster, in the poster's own print coordinates from zero to one. */
+export interface PosterHit {
+  readonly index: number;
+  readonly u: number;
+  readonly v: number;
+}
 
 export interface FilmsFrame {
   /** Continuous film position after the dwell, where 0 frames the first film. */
   readonly position: number;
   readonly cameraZ: number;
+  readonly time: number;
   readonly dt: number;
   /** Signed travel speed in films per second. */
   readonly velocity: number;
@@ -62,9 +81,7 @@ export interface FilmsFrame {
   readonly mode: LayoutMode;
   readonly lightLevel: number;
   readonly pixel: number;
-  readonly width: number;
-  readonly height: number;
-  readonly hovered: number | null;
+  readonly hovered: PosterHit | null;
   readonly reducedMotion: boolean;
 }
 
@@ -77,17 +94,21 @@ interface FilmNode {
   readonly poster: Mesh<PlaneGeometry, RawShaderMaterial>;
   readonly posterUniforms: Record<string, IUniform>;
   readonly width: number;
+  readonly key: Vec3;
   readonly ink: Vec3;
+  readonly sheen: Vector2;
   map: Texture | null;
   bitmap: ImageBitmap | null;
   mapState: LoadState;
   hover: number;
-  /** How formed the poster is, one when framed or approaching and zero once it is dust. */
+  tilt: Vector2;
+  sway: number;
+  swayVelocity: number;
+  /** How formed the poster is, one when framed or approaching and zero once it is ash. */
   visible: number;
-  /** How far the poster has broken into dust as the camera walks through it. */
+  /** How far the poster has broken into ash as the camera walks through it. */
   release: number;
   title: { mesh: Mesh; dust: Mesh; texture: DataTexture; align: TitleAlign } | null;
-  titleWanted: boolean;
 }
 
 /** Hi-resolution posters are fetched this far ahead of the camera and dropped after it. */
@@ -97,13 +118,22 @@ const KEEP_AHEAD = 10;
 const KEEP_BEHIND = 3;
 const MAX_LOADS = 4;
 
-/** Particles laid over a poster, roughly one per 11 world millimetres. */
+/** World padding round each print, room for a defocused edge to spread. */
+const PAD = 0.1;
+/** Grains laid over a poster, roughly one per eleven world millimetres. */
 const DUST_GRID = { columns: 88, rows: 132 } as const;
 /** Two posters at most are ever breaking up at once, so two particle systems are pooled. */
 const DUST_POOL = 2;
+/** Draw order steps per film. Deeper films draw first, so the scene paints back to front. */
+const ORDER_STEP = 10;
 
 const PAPER: Vec3 = hexToLinear('#efe8dc');
 const tmp = new Vector3();
+
+/** The floor sits just under the prints, lower in the stacked phone layout. */
+export function floorHeight(mode: LayoutMode): number {
+  return mode === 'spread' ? -POSTER_HEIGHT / 2 - 0.15 : -1.12;
+}
 
 function mixVec(a: Vec3, b: Vec3, t: number): Vec3 {
   return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
@@ -114,6 +144,16 @@ async function loadBitmap(src: string, signal: AbortSignal): Promise<ImageBitmap
   if (!response.ok) throw new Error(`Poster request failed with ${response.status}: ${src}`);
   return createImageBitmap(await response.blob(), { imageOrientation: 'flipY', premultiplyAlpha: 'none' });
 }
+
+/** Premultiplied alpha, so a print covers what is behind it while its rim adds light. */
+const premultiplied = {
+  transparent: true,
+  depthTest: false,
+  depthWrite: false,
+  blending: CustomBlending,
+  blendSrc: OneFactor,
+  blendDst: OneMinusSrcAlphaFactor,
+} as const;
 
 export class Films {
   readonly group = new Group();
@@ -130,43 +170,55 @@ export class Films {
     catalogue: Catalogue,
     private readonly renderer: WebGLRenderer,
     private readonly haze: HazeUniforms,
+    private readonly lens: LensUniforms,
     private readonly atlas: IUniform<Texture | null>,
     private readonly fontFamily: string,
     private readonly onError: (error: unknown) => void,
   ) {
     const { atlas: a } = catalogue;
     const rows = Math.ceil(catalogue.films.length / a.columns);
-    const blank = new Texture();
+    const count = catalogue.films.length;
 
     this.nodes = catalogue.films.map((film, index) => {
       const placement = placeFilm(index);
-      const aspect = film.image.width / film.image.height;
-      const width = POSTER_HEIGHT * aspect;
+      const width = POSTER_HEIGHT * (film.image.width / film.image.height);
       const col = index % a.columns;
       const row = Math.floor(index / a.columns);
       const key = hexToLinear(film.palette.key);
+      const sheen = new Vector2(0.5, 0.6);
       const uniforms: Record<string, IUniform> = {
         ...haze,
+        ...lens,
         uAtlas: atlas,
         uAtlasRect: { value: [col / a.columns, 1 - (row + 1) / rows, 1 / a.columns, 1 / rows] },
-        uMap: { value: blank },
+        uMap: { value: null },
         uMapMix: { value: 0 },
+        uMapSize: { value: [film.image.width, film.image.height] },
+        uPad: { value: [PAD / (width + 2 * PAD), PAD / (POSTER_HEIGHT + 2 * PAD)] },
         uFar: { value: 1 },
         uRelease: { value: 0 },
         uDirection: { value: placement.side },
-        uGlow: { value: 1 },
         uHover: { value: 0 },
         uSeed: { value: (index * 0.618) % 1 },
+        uKey: { value: key },
+        uAccent: { value: hexToLinear(film.palette.accent) },
+        uSheen: { value: sheen },
       };
-      const material = new RawShaderMaterial({
-        glslVersion: GLSL3,
-        vertexShader: posterVertex,
-        fragmentShader: posterFragment,
-        uniforms,
-      });
-      const poster = new Mesh(new PlaneGeometry(width, POSTER_HEIGHT), material);
+      const poster = new Mesh(
+        new PlaneGeometry(width + 2 * PAD, POSTER_HEIGHT + 2 * PAD),
+        new RawShaderMaterial({
+          glslVersion: GLSL3,
+          vertexShader: posterVertex,
+          fragmentShader: posterFragment,
+          uniforms,
+          side: DoubleSide,
+          ...premultiplied,
+        }),
+      );
       poster.userData.index = index;
-      poster.matrixAutoUpdate = true;
+      poster.renderOrder = (count - index) * ORDER_STEP;
+      // Layer one is what the floor's mirror camera sees.
+      poster.layers.enable(1);
       this.group.add(poster);
       return {
         film,
@@ -175,21 +227,250 @@ export class Films {
         poster,
         posterUniforms: uniforms,
         width,
-        ink: mixVec(PAPER, key, 0.14),
+        key,
+        ink: mixVec(PAPER, key, 0.12),
+        sheen,
         map: null,
         bitmap: null,
         mapState: 'idle' as LoadState,
         hover: 0,
+        tilt: new Vector2(),
+        sway: 0,
+        swayVelocity: 0,
         visible: 0,
         release: 0,
         title: null,
-        titleWanted: false,
       };
     });
     this.posterDust = this.createPosterDust();
   }
 
-  /** One grid of particle cells, shared by every pooled dust system. */
+  get count(): number {
+    return this.nodes.length;
+  }
+
+  /** Posters that can be hovered or clicked right now, fully formed in front of the camera. */
+  pickables(): Mesh[] {
+    return this.nodes.filter((n) => n.poster.visible && n.visible > 0.92).map((n) => n.poster);
+  }
+
+  /** Converts a raycast uv on the padded quad into print coordinates. */
+  printCoordinates(index: number, uv: Vector2): { u: number; v: number } {
+    const node = this.nodes[index];
+    if (!node) return { u: 0.5, v: 0.5 };
+    const [pu, pv] = node.posterUniforms.uPad!.value as number[];
+    return {
+      u: clamp((uv.x - pu!) / (1 - 2 * pu!), 0, 1),
+      v: clamp((uv.y - pv!) / (1 - 2 * pv!), 0, 1),
+    };
+  }
+
+  /**
+   * Where the lens should focus. It holds on the framed film and racks to the next one once
+   * the camera is on its way, so the approaching poster sharpens as the last one turns to ash.
+   */
+  focusDistance(position: number, camera: Vector3): number {
+    const next = this.nodes[clamp(Math.ceil(position - 0.42), 0, this.nodes.length - 1)];
+    return next ? camera.distanceTo(next.poster.position) : 3.3;
+  }
+
+  update(frame: FilmsFrame): void {
+    if (frame.mode !== this.mode) {
+      this.mode = frame.mode;
+      for (const node of this.nodes) this.dropTitle(node);
+    }
+    this.titleBudget = 1;
+    // Titles nearest the camera are set first, so the one being approached is never late.
+    const order = [...this.nodes].sort(
+      (a, b) => Math.abs(a.index - frame.position) - Math.abs(b.index - frame.position),
+    );
+    for (const node of order) this.updateNode(node, frame);
+    this.assignPosterDust(frame);
+  }
+
+  private updateNode(node: FilmNode, frame: FilmsFrame): void {
+    const { placement, poster, posterUniforms: u, index } = node;
+    const stack = frame.mode === 'stack';
+    const zDist = frame.cameraZ - placement.z;
+    const far = 1 - smoothstep(22, 30, zDist);
+    node.release = 1 - smoothstep(1.15, 3.15, zDist);
+    node.visible = far * (1 - node.release);
+    poster.visible = far > 0.001 && node.release < 0.999;
+
+    // Hanging prints swing on a soft spring when the camera rushes past them.
+    const still = frame.reducedMotion;
+    const proximity = smoothstep(9, 2.4, zDist);
+    const swayTarget = still ? 0 : clamp(frame.velocity * 0.06 * proximity, -0.1, 0.1);
+    node.swayVelocity += ((swayTarget - node.sway) * 18 - node.swayVelocity * 2.4) * frame.dt;
+    node.sway += node.swayVelocity * frame.dt;
+
+    // The pointer leans the print toward it and slides a highlight across its coat.
+    const hit = frame.hovered?.index === index ? frame.hovered : null;
+    node.hover = damp(node.hover, hit ? 1 : 0, 9, frame.dt);
+    if (hit) {
+      node.tilt.set(damp(node.tilt.x, hit.u - 0.5, 8, frame.dt), damp(node.tilt.y, hit.v - 0.5, 8, frame.dt));
+      node.sheen.set(damp(node.sheen.x, 0.2 + (1 - hit.u) * 0.6, 7, frame.dt), damp(node.sheen.y, 0.25 + (1 - hit.v) * 0.6, 7, frame.dt));
+    } else {
+      node.tilt.set(damp(node.tilt.x, 0, 5, frame.dt), damp(node.tilt.y, 0, 5, frame.dt));
+    }
+    const lean = still ? 0 : node.hover;
+
+    const scale = stack ? 0.78 : 1;
+    const x = stack ? 0 : placement.x;
+    const y = (stack ? 0.36 : placement.y) + (still ? 0 : frame.drift * 0.05 * smoothstep(1, 6, zDist));
+    poster.position.set(x, y, placement.z + lean * 0.06);
+    poster.rotation.set(
+      node.sway - node.tilt.y * 0.14 * lean,
+      (stack ? 0 : placement.yaw) + node.tilt.x * 0.18 * lean,
+      placement.roll + node.sway * 0.35 * placement.side,
+    );
+    poster.scale.setScalar(scale);
+
+    u.uFar!.value = far;
+    u.uRelease!.value = node.release;
+    u.uHover!.value = node.hover;
+
+    // Stream the full poster near the camera, and let go of it once it is well behind.
+    const rel = index - frame.position;
+    if (rel >= -STREAM_BEHIND && rel <= STREAM_AHEAD && node.mapState === 'idle') this.requestMap(node);
+    if ((rel < -KEEP_BEHIND || rel > KEEP_AHEAD) && node.mapState === 'ready') this.releaseMap(node);
+    u.uMapMix!.value = damp(u.uMapMix!.value as number, node.mapState === 'ready' ? 1 : 0, 6, frame.dt);
+
+    this.updateTitle(node, frame, x, y, scale, stack);
+  }
+
+  /**
+   * Titles form out of dust as their film arrives and puff away as the camera leaves.
+   * Both directions are a pure function of position, so scrolling back rebuilds the text.
+   */
+  private updateTitle(node: FilmNode, frame: FilmsFrame, x: number, y: number, scale: number, stack: boolean): void {
+    const i = node.index;
+    const arrive = 1 - smoothstep(i - 0.85, i - 0.12, frame.position);
+    const leave = smoothstep(i + 0.1, i + 0.7, frame.position);
+    const progress = Math.max(arrive, leave);
+
+    if (progress >= 1) {
+      if (Math.abs(i - frame.position) > 3) this.dropTitle(node);
+      if (node.title) node.title.mesh.visible = node.title.dust.visible = false;
+      return;
+    }
+    if (!node.title && this.titleBudget > 0) {
+      this.titleBudget--;
+      this.buildTitle(node, stack ? 'left' : node.placement.side > 0 ? 'right' : 'left');
+    }
+    const title = node.title;
+    if (!title) return;
+
+    const posterHalfW = (node.width * scale) / 2;
+    const posterTop = y + (POSTER_HEIGHT * scale) / 2;
+    const titleScale = stack ? 0.8 : 1;
+    const tw = TITLE_PLANE.width * titleScale;
+    const th = TITLE_PLANE.height * titleScale;
+    let tx: number;
+    let ty: number;
+    if (stack) {
+      tx = x - posterHalfW + tw / 2;
+      ty = y - (POSTER_HEIGHT * scale) / 2 - 0.07 - th / 2;
+    } else {
+      const gap = 0.16;
+      tx = node.placement.side > 0 ? x - posterHalfW - gap - tw / 2 : x + posterHalfW + gap + tw / 2;
+      ty = posterTop - th / 2;
+    }
+    const z = node.placement.z - (stack ? 0.02 : 0.22);
+    for (const mesh of [title.mesh, title.dust]) {
+      mesh.visible = true;
+      mesh.position.set(tx, ty, z);
+      mesh.scale.setScalar(titleScale);
+    }
+    const direction = title.align === 'right' ? -1 : 1;
+    const fade = smoothstep(0.5, 1.6, frame.cameraZ - z);
+    for (const mesh of [title.mesh, title.dust]) {
+      const uniforms = (mesh.material as RawShaderMaterial).uniforms;
+      uniforms.uProgress!.value = progress;
+      uniforms.uDirection!.value = direction;
+      uniforms.uOpacity!.value = fade;
+    }
+    const dust = (title.dust.material as RawShaderMaterial).uniforms;
+    dust.uPixel!.value = frame.pixel;
+    dust.uTime!.value = frame.time;
+  }
+
+  private buildTitle(node: FilmNode, align: TitleAlign): void {
+    const art = drawTitleArt(node.film, this.fontFamily, align);
+    const texture = new DataTexture(art.coverage, art.width, art.height, RedFormat, UnsignedByteType);
+    texture.minFilter = LinearMipmapLinearFilter;
+    texture.magFilter = LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    texture.needsUpdate = true;
+
+    const shared = {
+      ...this.lens,
+      uProgress: { value: 1 },
+      uSeed: { value: (node.index * 0.371) % 1 },
+      uDirection: { value: 1 },
+      uOpacity: { value: 1 },
+      uInk: { value: node.ink },
+    };
+    const order = (this.nodes.length - node.index) * ORDER_STEP;
+    const mesh = new Mesh(
+      this.titleGeometry,
+      new RawShaderMaterial({
+        glslVersion: GLSL3,
+        vertexShader: posterVertex,
+        fragmentShader: titleFragment,
+        uniforms: {
+          ...shared,
+          uMap: { value: texture },
+          uMapSize: { value: [art.width, art.height] },
+          uExtinction: this.haze.uExtinction,
+        },
+        ...premultiplied,
+      }),
+    );
+
+    const geometry = new InstancedBufferGeometry();
+    geometry.index = this.dustQuad.index;
+    geometry.setAttribute('position', this.dustQuad.getAttribute('position'));
+    geometry.setAttribute('aPoint', new InstancedBufferAttribute(art.points, 4));
+    geometry.instanceCount = art.count;
+    const dust = new Mesh(
+      geometry,
+      new RawShaderMaterial({
+        glslVersion: GLSL3,
+        vertexShader: titleDustVertex,
+        fragmentShader: titleDustFragment,
+        uniforms: {
+          ...shared,
+          uPlane: { value: [TITLE_PLANE.width, TITLE_PLANE.height] },
+          uPixel: { value: 1 },
+          uTime: { value: 0 },
+        },
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        blending: AdditiveBlending,
+      }),
+    );
+    dust.frustumCulled = false;
+    mesh.renderOrder = order + 1;
+    dust.renderOrder = order + 2;
+    this.group.add(mesh, dust);
+    node.title = { mesh, dust, texture, align };
+  }
+
+  private dropTitle(node: FilmNode): void {
+    const title = node.title;
+    if (!title) return;
+    this.group.remove(title.mesh, title.dust);
+    (title.mesh.material as RawShaderMaterial).dispose();
+    (title.dust.material as RawShaderMaterial).dispose();
+    title.dust.geometry.dispose();
+    title.texture.dispose();
+    node.title = null;
+  }
+
+  /** One grid of grain cells, shared by every pooled ash system. */
   private createPosterDust(): Mesh<InstancedBufferGeometry, RawShaderMaterial>[] {
     const { columns, rows } = DUST_GRID;
     const cells = new Float32Array(columns * rows * 3);
@@ -214,6 +495,7 @@ export class Films {
           vertexShader: posterDustVertex,
           fragmentShader: posterDustFragment,
           uniforms: {
+            ...this.lens,
             uAtlas: this.atlas,
             uAtlasRect: { value: [0, 0, 1, 1] },
             uMap: { value: null },
@@ -223,22 +505,24 @@ export class Films {
             uRelease: { value: 0 },
             uDirection: { value: 1 },
             uSeed: { value: 0 },
+            uTime: { value: 0 },
+            uKey: { value: [1, 1, 1] },
           },
           transparent: true,
+          depthTest: false,
           depthWrite: false,
           blending: AdditiveBlending,
         }),
       );
       mesh.frustumCulled = false;
       mesh.visible = false;
-      mesh.renderOrder = 5;
       this.group.add(mesh);
       return mesh;
     });
   }
 
-  /** Hands the pooled particle systems to the posters that are breaking up this frame. */
-  private assignPosterDust(): void {
+  /** Hands the pooled ash systems to the posters that are breaking up this frame. */
+  private assignPosterDust(frame: FilmsFrame): void {
     const breaking = this.nodes
       .filter((n) => n.release > 0.001 && n.release < 0.999 && n.poster.visible)
       .slice(0, DUST_POOL);
@@ -249,6 +533,7 @@ export class Films {
       mesh.position.copy(node.poster.position);
       mesh.rotation.copy(node.poster.rotation);
       mesh.scale.copy(node.poster.scale);
+      mesh.renderOrder = node.poster.renderOrder + 3;
       const u = mesh.material.uniforms;
       const p = node.posterUniforms;
       u.uAtlasRect!.value = p.uAtlasRect!.value;
@@ -257,191 +542,11 @@ export class Films {
       u.uRelease!.value = node.release;
       u.uDirection!.value = p.uDirection!.value;
       u.uSeed!.value = p.uSeed!.value;
+      u.uTime!.value = frame.time;
+      u.uKey!.value = node.key;
       (u.uPlane!.value as number[])[0] = node.width;
       (u.uPlane!.value as number[])[1] = POSTER_HEIGHT;
     });
-  }
-
-  get count(): number {
-    return this.nodes.length;
-  }
-
-  /** Posters that can be clicked right now, in front of the camera and fully formed. */
-  pickables(): Mesh[] {
-    return this.nodes.filter((n) => n.poster.visible && n.visible > 0.92).map((n) => n.poster);
-  }
-
-  update(frame: FilmsFrame): void {
-    if (frame.mode !== this.mode) {
-      this.mode = frame.mode;
-      for (const node of this.nodes) this.dropTitle(node);
-    }
-    this.titleBudget = 1;
-    const tilt = frame.reducedMotion ? 0 : clamp(frame.velocity * 0.03, -0.12, 0.12);
-    const stack = frame.mode === 'stack';
-
-    // Titles nearest the camera are set first, so the one being approached is never late.
-    const order = [...this.nodes].sort(
-      (a, b) => Math.abs(a.index - frame.position) - Math.abs(b.index - frame.position),
-    );
-    for (const node of order) this.updateNode(node, frame, tilt, stack);
-    this.assignPosterDust();
-  }
-
-  private updateNode(node: FilmNode, frame: FilmsFrame, tilt: number, stack: boolean): void {
-    const { placement, poster, posterUniforms: u, index } = node;
-    const zDist = frame.cameraZ - placement.z;
-    const far = 1 - smoothstep(22, 30, zDist);
-    node.release = 1 - smoothstep(1.15, 3.15, zDist);
-    node.visible = far * (1 - node.release);
-    poster.visible = far > 0.001 && node.release < 0.999;
-
-    const scale = stack ? 0.78 : 1;
-    const x = stack ? 0 : placement.x;
-    const y = (stack ? 0.36 : placement.y) + (frame.reducedMotion ? 0 : frame.drift * 0.06 * smoothstep(1, 6, zDist));
-    poster.position.set(x, y, placement.z);
-    poster.rotation.set(tilt, stack ? 0 : placement.yaw, placement.roll);
-    poster.scale.setScalar(scale);
-
-    node.hover = damp(node.hover, frame.hovered === index ? 1 : 0, 10, frame.dt);
-    u.uFar!.value = far;
-    u.uRelease!.value = node.release;
-    u.uHover!.value = node.hover;
-
-    // Stream the full poster near the camera, and let go of it once it is well behind.
-    const rel = index - frame.position;
-    if (rel >= -STREAM_BEHIND && rel <= STREAM_AHEAD && node.mapState === 'idle') this.requestMap(node);
-    if ((rel < -KEEP_BEHIND || rel > KEEP_AHEAD) && node.mapState === 'ready') this.releaseMap(node);
-    u.uMapMix!.value = damp(u.uMapMix!.value as number, node.mapState === 'ready' ? 1 : 0, 6, frame.dt);
-
-    this.updateTitle(node, frame, x, y, scale, stack);
-  }
-
-  /**
-   * Titles form out of dust as their film arrives and puff away as the camera leaves.
-   * Both directions are a pure function of position, so scrolling back rebuilds the text.
-   */
-  private updateTitle(node: FilmNode, frame: FilmsFrame, x: number, y: number, scale: number, stack: boolean): void {
-    const i = node.index;
-    const arrive = 1 - smoothstep(i - 0.85, i - 0.12, frame.position);
-    const leave = smoothstep(i + 0.1, i + 0.7, frame.position);
-    const progress = Math.max(arrive, leave);
-    node.titleWanted = progress < 1;
-
-    if (!node.titleWanted) {
-      if (Math.abs(i - frame.position) > 3) this.dropTitle(node);
-      if (node.title) node.title.mesh.visible = node.title.dust.visible = false;
-      return;
-    }
-    if (!node.title && this.titleBudget > 0) {
-      this.titleBudget--;
-      this.buildTitle(node, stack ? 'left' : node.placement.side > 0 ? 'right' : 'left');
-    }
-    const title = node.title;
-    if (!title) return;
-
-    const posterHalfW = (node.width * scale) / 2;
-    const posterTop = y + (POSTER_HEIGHT * scale) / 2;
-    const titleScale = stack ? clamp((frame.width / frame.height) * 1.9, 0.62, 0.86) : 1;
-    const tw = TITLE_PLANE.width * titleScale;
-    const th = TITLE_PLANE.height * titleScale;
-    let tx: number;
-    let ty: number;
-    if (stack) {
-      tx = x - posterHalfW + tw / 2;
-      ty = y - (POSTER_HEIGHT * scale) / 2 - 0.07 - th / 2;
-    } else {
-      const gap = 0.14;
-      tx = node.placement.side > 0 ? x - posterHalfW - gap - tw / 2 : x + posterHalfW + gap + tw / 2;
-      ty = posterTop - th / 2;
-    }
-    const z = node.placement.z - (stack ? 0.02 : 0.22);
-    for (const mesh of [title.mesh, title.dust]) {
-      mesh.visible = true;
-      mesh.position.set(tx, ty, z);
-      mesh.scale.setScalar(titleScale);
-    }
-    const direction = title.align === 'right' ? -1 : 1;
-    const zDist = frame.cameraZ - z;
-    const fade = smoothstep(0.5, 1.6, zDist);
-    for (const mat of [title.mesh.material, title.dust.material] as RawShaderMaterial[]) {
-      mat.uniforms.uProgress!.value = progress;
-      mat.uniforms.uDirection!.value = direction;
-      mat.uniforms.uOpacity!.value = fade;
-    }
-    const dustMat = title.dust.material as RawShaderMaterial;
-    dustMat.uniforms.uPixel!.value = frame.pixel;
-    (dustMat.uniforms.uResolution!.value as number[])[0] = frame.width;
-    (dustMat.uniforms.uResolution!.value as number[])[1] = frame.height;
-  }
-
-  private buildTitle(node: FilmNode, align: TitleAlign): void {
-    const art = drawTitleArt(node.film, this.fontFamily, align);
-    const texture = new DataTexture(art.coverage, art.width, art.height, RedFormat, UnsignedByteType);
-    texture.minFilter = LinearMipmapLinearFilter;
-    texture.magFilter = LinearFilter;
-    texture.generateMipmaps = true;
-    texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-    texture.needsUpdate = true;
-
-    const shared = {
-      uProgress: { value: 1 },
-      uSeed: { value: (node.index * 0.371) % 1 },
-      uDirection: { value: 1 },
-      uOpacity: { value: 1 },
-      uInk: { value: node.ink },
-    };
-    const mesh = new Mesh(
-      this.titleGeometry,
-      new RawShaderMaterial({
-        glslVersion: GLSL3,
-        vertexShader: posterVertex,
-        fragmentShader: titleFragment,
-        uniforms: { ...shared, uMap: { value: texture }, uExtinction: this.haze.uExtinction },
-        transparent: true,
-        depthWrite: false,
-        blending: NormalBlending,
-      }),
-    );
-
-    const geometry = new InstancedBufferGeometry();
-    geometry.index = this.dustQuad.index;
-    geometry.setAttribute('position', this.dustQuad.getAttribute('position'));
-    geometry.setAttribute('aPoint', new InstancedBufferAttribute(art.points, 4));
-    geometry.instanceCount = art.count;
-    const dust = new Mesh(
-      geometry,
-      new RawShaderMaterial({
-        glslVersion: GLSL3,
-        vertexShader: titleDustVertex,
-        fragmentShader: titleDustFragment,
-        uniforms: {
-          ...shared,
-          uPlane: { value: [TITLE_PLANE.width, TITLE_PLANE.height] },
-          uPixel: { value: 1 },
-          uResolution: { value: [1, 1] },
-        },
-        transparent: true,
-        depthWrite: false,
-        blending: AdditiveBlending,
-      }),
-    );
-    dust.frustumCulled = false;
-    mesh.renderOrder = 2;
-    dust.renderOrder = 3;
-    this.group.add(mesh, dust);
-    node.title = { mesh, dust, texture, align };
-  }
-
-  private dropTitle(node: FilmNode): void {
-    const title = node.title;
-    if (!title) return;
-    this.group.remove(title.mesh, title.dust);
-    (title.mesh.material as RawShaderMaterial).dispose();
-    (title.dust.material as RawShaderMaterial).dispose();
-    title.dust.geometry.dispose();
-    title.texture.dispose();
-    node.title = null;
   }
 
   private requestMap(node: FilmNode): void {
@@ -506,7 +611,7 @@ export class Films {
           const sample = node.film.light[r * LIGHT_COLUMNS + c]!;
           tmp.set((c - 0.5) * w * 0.52, (1 - r) * (POSTER_HEIGHT / 3.1), 0.05).applyMatrix4(poster.matrixWorld);
           positions.set([tmp.x, tmp.y, tmp.z, poster.position.z], n * 4);
-          const k = sample[3] * node.visible * frame.lightLevel;
+          const k = sample[3] * node.visible * frame.lightLevel * (1 + 0.35 * node.hover);
           colors.set([sample[0] * k, sample[1] * k, sample[2] * k, 0], n * 4);
           n++;
         }
