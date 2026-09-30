@@ -172,7 +172,8 @@ float releaseJitter(float seed) {
 
 float releaseFront(vec2 uv, float seed, float direction, float progress) {
   float sweep = direction > 0.0 ? uv.x : 1.0 - uv.x;
-  float threshold = 0.62 * sweep + 0.38 * valueNoise2(uv * vec2(9.0, 5.0) + seed * 13.7);
+  float drifts = 0.66 * valueNoise2(uv * vec2(4.0, 2.6) + seed * 13.7) + 0.34 * valueNoise2(uv * vec2(11.0, 7.0) + seed * 5.3);
+  float threshold = 0.5 * sweep + 0.5 * drifts;
   return (progress * 1.42 - threshold) / 0.42;
 }
 

@@ -468,6 +468,7 @@ export class Films {
           uTime: { value: 0 },
           uSpeed: { value: 0 },
         },
+        side: DoubleSide,
         transparent: true,
         depthTest: false,
         depthWrite: false,
@@ -531,7 +532,7 @@ export class Films {
             uSpeed: { value: 0 },
             uKey: { value: [1, 1, 1] },
           },
-          // Ash is laid over the scene rather than added to it, so dense drifts never blow out.
+          side: DoubleSide,
           ...premultiplied,
         }),
       );

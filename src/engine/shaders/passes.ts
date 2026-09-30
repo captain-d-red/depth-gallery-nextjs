@@ -258,7 +258,8 @@ Sprite placeSprite(vec3 p, vec3 before, float grainPx, vec2 corner) {
   float len = length(motion);
   vec2 dir = len > 1e-6 ? motion / len : vec2(0.0, 1.0);
   float streak = min(len * 0.5, size * 5.0);
-  vec2 nrm = vec2(-dir.y, dir.x);
+  // A right-handed basis, so the quad keeps its winding whichever way the particle moves.
+  vec2 nrm = vec2(dir.y, -dir.x);
   view.xy += nrm * corner.x * size + dir * corner.y * (size + streak) - motion * 0.5;
   sp.view = view;
   sp.bokeh = smoothstep(2.0, 5.0, coc / max(grainPx, 0.5));
