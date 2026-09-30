@@ -5,6 +5,7 @@ import { useImperativeHandle, useRef, useState, type MouseEvent, type Ref } from
 import { catalogue, type Film } from '@/data/catalogue';
 import type { EngineFrame } from '@/engine/Engine';
 import styles from './Hud.module.css';
+import { Logotype } from './Logotype';
 
 export interface HudHandle {
   update(frame: EngineFrame): void;
@@ -138,11 +139,7 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
 
       <header className={styles.top}>
         <Link className={styles.brand} href="/" aria-label="AK47, Depth Gallery Experience">
-          <svg className={styles.mark} viewBox="0 0 40 40" aria-hidden="true">
-            <path d="M20 4 L36 35 H29.5 L20 16.5 L10.5 35 H4 Z" fill="currentColor" />
-            <circle cx="20" cy="27.5" r="3.2" fill="var(--rec)" />
-          </svg>
-          <span className={styles.word}>AK47</span>
+          <Logotype className={styles.mark} />
           <span className={styles.section}>Depth Gallery Experience</span>
         </Link>
         <nav className={styles.links} aria-label="Sections">

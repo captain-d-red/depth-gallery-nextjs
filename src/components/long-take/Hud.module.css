@@ -131,29 +131,21 @@
   margin: 0;
 }
 
-/* The AK47 mark, a chevron A whose crossbar is the red record light, then the wordmark. */
+/* The AK47 logotype, then the name of this experience. */
 .brand {
   justify-self: start;
   display: flex;
   align-items: center;
-  gap: 0.62em;
   font-size: 1.2em;
   color: var(--paper);
   text-decoration: none;
   pointer-events: auto;
 }
 
+/* The A keeps its old size, so the logotype is as tall as the mark was, at 113.03 by 40 units. */
 .mark {
-  width: 1.52em;
   height: 1.52em;
-}
-
-.word {
-  /* The tracking trails the last letter, so the gap after the word is pulled back to match. */
-  margin-right: -0.34em;
-  font-weight: 780;
-  letter-spacing: 0.34em;
-  text-transform: uppercase;
+  width: calc(1.52em * 113.03 / 40);
 }
 
 .section {
