@@ -1,0 +1,28 @@
+.root {
+  position: relative;
+}
+
+.canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100lvh;
+  display: block;
+  background: var(--ink);
+  touch-action: pan-y;
+}
+
+.track {
+  pointer-events: none;
+}
+
+.unsupported {
+  position: fixed;
+  inset: auto var(--gutter) 40vh;
+  max-width: 34ch;
+  margin: 0 auto;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--paper-2);
+}

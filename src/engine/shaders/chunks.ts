@@ -10,7 +10,8 @@ export const glsl = (strings: TemplateStringsArray, ...values: (string | number)
 /** Seven posters around the camera, six light samples each. */
 export const MAX_LIGHTS = 42;
 
-export const header = glsl`#version 300 es
+/** Three adds `#version 300 es` itself for materials created with `glslVersion: GLSL3`. */
+export const header = glsl`
 precision highp float;
 precision highp int;
 `;
@@ -140,6 +141,19 @@ vec3 inscatter(vec3 ro, vec3 rd, float tMax, vec2 density) {
     sum += uLightCol[i].rgb * (line * fog * d);
   }
   return sum * uScatter;
+}
+`;
+
+/**
+ * How far text has broken into dust at a given progress. Titles and their particles call the
+ * same function, so a glyph fragment disappears at exactly the moment its particle leaves.
+ * The front sweeps away from the poster and is broken up by noise, like breath on cold glass.
+ */
+export const release = glsl`
+float releaseAmount(vec2 uv, float seed, float direction, float progress) {
+  float sweep = direction > 0.0 ? uv.x : 1.0 - uv.x;
+  float threshold = 0.58 * sweep + 0.42 * valueNoise2(uv * vec2(13.0, 6.5) + seed * 13.7);
+  return clamp((progress * 1.42 - threshold) / 0.42, 0.0, 1.0);
 }
 `;
 

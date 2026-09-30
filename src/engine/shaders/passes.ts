@@ -1,4 +1,4 @@
-import { MAX_LIGHTS, fullscreenVertex, glsl, haze, header, noise, viewRay } from './chunks';
+import { MAX_LIGHTS, fullscreenVertex, glsl, haze, header, noise, release, viewRay } from './chunks';
 
 export { fullscreenVertex };
 
@@ -97,21 +97,82 @@ void main() {
 }
 `;
 
-/** Titles are set large behind their posters, so type and image share one depth. */
+/**
+ * Type is set in the scene beside its poster, so it sits in the same air. Wherever the
+ * release front has passed, the glyph is gone and its particle has taken over.
+ */
 export const titleFragment = glsl`${header}
+${noise}
+${release}
 uniform vec3 cameraPosition;
 uniform sampler2D uMap;
 uniform vec3 uInk;
 uniform float uOpacity;
 uniform float uExtinction;
+uniform float uProgress;
+uniform float uSeed;
+uniform float uDirection;
 in vec2 vUv;
 in vec3 vWorld;
 out vec4 fragColor;
 void main() {
-  float a = texture(uMap, vUv).a * uOpacity;
-  if (a < 0.002) discard;
+  float coverage = texture(uMap, vUv).r;
+  if (coverage < 0.004) discard;
+  float released = releaseAmount(vUv, uSeed, uDirection, uProgress);
+  if (released > 0.0) discard;
   float dist = length(vWorld - cameraPosition);
-  fragColor = vec4(uInk * exp(-uExtinction * dist * 1.2), a);
+  fragColor = vec4(uInk * exp(-uExtinction * dist), coverage * uOpacity);
+}
+`;
+
+/**
+ * One particle per sampled glyph pixel. It waits invisibly until the release front reaches
+ * it, then puffs away from the page, rising and spreading like breath in cold air.
+ */
+export const titleDustVertex = glsl`${header}
+${noise}
+${release}
+uniform mat4 modelMatrix;
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+uniform vec2 uPlane;
+uniform float uProgress;
+uniform float uSeed;
+uniform float uDirection;
+uniform float uPixel;
+uniform vec2 uResolution;
+in vec3 position;
+in vec4 aPoint;
+out vec2 vLocal;
+out float vAlpha;
+
+void main() {
+  float r = releaseAmount(aPoint.xy, uSeed, uDirection, uProgress);
+  vec3 local = vec3((aPoint.x - 0.5) * uPlane.x, (aPoint.y - 0.5) * uPlane.y, 0.0);
+  vec3 q = vec3(aPoint.xy * vec2(7.0, 3.5), aPoint.z * 9.0 + uSeed);
+  vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 19.1), valueNoise3(q + 41.7)) - 0.5;
+  float travel = 1.0 - exp(-r * 2.4);
+  vec3 drift = vec3(-uDirection * 0.28 + swirl.x * 0.75, 0.22 + swirl.y * 0.55, 0.3 + swirl.z * 0.9);
+  local += drift * travel * 0.85 + vec3(0.0, r * r * 0.22, 0.0);
+  vec4 clip = projectionMatrix * viewMatrix * modelMatrix * vec4(local, 1.0);
+  float size = uPixel * aPoint.w * (1.0 + r * 2.4);
+  clip.xy += position.xy * size / uResolution * 2.0 * clip.w;
+  gl_Position = clip;
+  vLocal = position.xy;
+  vAlpha = r > 0.0 && r < 1.0 ? pow(1.0 - r, 1.6) * smoothstep(0.0, 0.06, r) : 0.0;
+}
+`;
+
+export const titleDustFragment = glsl`${header}
+uniform vec3 uInk;
+uniform float uOpacity;
+in vec2 vLocal;
+in float vAlpha;
+out vec4 fragColor;
+void main() {
+  if (vAlpha <= 0.0) discard;
+  float a = exp(-dot(vLocal, vLocal) * 3.0) * vAlpha * uOpacity;
+  fragColor = vec4(uInk * a, 1.0);
 }
 `;
 
@@ -260,4 +321,6 @@ void main() {
   srgb += grain * uGrain * (1.0 - 0.65 * luma);
   float dither = hash12(gl_FragCoord.xy + 17.0) + hash12(gl_FragCoord.yx + 41.0) - 1.0;
   srgb += dither / 255.0;
-  f
+  fragColor = vec4(srgb, 1.0);
+}
+`;

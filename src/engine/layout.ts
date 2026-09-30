@@ -22,9 +22,9 @@ export const SCROLL_PER_FILM = 0.78;
  */
 export const DWELL = 0.62;
 
-const GOLDEN_ANGLE = 2.399963229728653;
-
 export interface Placement {
+  /** Which side of the camera path the poster hangs on, with its type on the other side. */
+  readonly side: 1 | -1;
   readonly x: number;
   readonly y: number;
   readonly z: number;
@@ -35,18 +35,23 @@ export interface Placement {
 }
 
 /**
- * Posters wander left and right on a golden-angle sequence, so neighbours never line up
- * and the next poster always peeks out from behind the current one.
+ * Posters alternate sides of the camera path, so the take zigzags through depth. Each
+ * poster's type is set on the opposite side, and the next poster peeks out behind it.
+ *
+ *        type │ poster              film 0
+ *    poster │ type                  film 1
+ *        type │ poster              film 2
  */
 export function placeFilm(index: number): Placement {
-  const x = 0.44 * Math.sin(index * GOLDEN_ANGLE) + 0.08 * Math.sin(index * 0.61);
-  const y = 0.05 * Math.sin(index * 1.71 + 0.4);
+  const side = index % 2 === 0 ? 1 : -1;
+  const x = side * (0.4 + 0.05 * Math.sin(index * 1.37));
   return {
+    side,
     x,
-    y,
+    y: 0.04 * Math.sin(index * 1.71 + 0.4),
     z: -index * GAP,
-    yaw: -x * 0.16,
-    roll: 0.014 * Math.sin(index * 3.13 + 1.1),
+    yaw: -x * 0.2,
+    roll: 0.012 * Math.sin(index * 3.13 + 1.1),
   };
 }
 
@@ -61,28 +66,4 @@ export function dwell(position: number, amount: number = DWELL): number {
 /** Camera Z for a continuous film position, where 0 frames the first film. */
 export function cameraZForPosition(position: number): number {
   return FOCUS - position * GAP;
-}
-
-/** The inverse of {@link cameraZForPosition}. */
-export function positionForCameraZ(z: number): number {
-  return (FOCUS - z) / GAP;
-}
-
-/** Total scroll length in pixels for a catalogue of `count` films. */
-export function scrollLength(count: number, viewportHeight: number): number {
-  return Math.max(0, count - 1) * SCROLL_PER_FILM * viewportHeight;
-}
-
-/** Converts a scroll offset into a continuous film position, before the dwell is applied. */
-export function positionForScroll(scroll: number, count: number, viewportHeight: number): number {
-  const length = scrollLength(count, viewportHeight);
-  if (length <= 0) return 0;
-  const t = Math.min(1, Math.max(0, scroll / length));
-  return t * (count - 1);
-}
-
-/** The scroll offset that frames film `index`. */
-export function scrollForIndex(index: number, count: number, viewportHeight: number): number {
-  const clamped = Math.min(count - 1, Math.max(0, index));
-  return clamped * SCROLL_PER_FILM * viewportHeight;
 }
