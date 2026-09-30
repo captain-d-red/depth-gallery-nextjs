@@ -120,8 +120,8 @@ const MAX_LOADS = 4;
 
 /** World padding round each print, room for a defocused edge to spread. */
 const PAD = 0.1;
-/** Grains laid over a poster, roughly one per eight world millimetres. */
-const DUST_GRID = { columns: 120, rows: 180 } as const;
+/** Particles laid over a poster, roughly one per six and a half world millimetres. */
+const DUST_GRID = { columns: 150, rows: 225 } as const;
 /** Two posters at most are ever breaking up at once, so two particle systems are pooled. */
 const DUST_POOL = 2;
 /** Draw order steps per film. Deeper films draw first, so the scene paints back to front. */
@@ -133,6 +133,24 @@ const tmp = new Vector3();
 /** The floor sits just under the prints, lower in the stacked phone layout. */
 export function floorHeight(mode: LayoutMode): number {
   return mode === 'spread' ? -POSTER_HEIGHT / 2 - 0.15 : -1.12;
+}
+
+/**
+ * The rim is graded from the colour the top of the print glows with to the colour at its
+ * foot, read from the light samples, so a night sky over a field of marigolds runs from blue
+ * down to orange. A poster with one colour gets a gentle lift toward the top instead.
+ */
+function rimGradient(film: Film): { uRimTop: IUniform<Vec3>; uRimBottom: IUniform<Vec3> } {
+  const row = (r: number): Vec3 => {
+    const a = film.light[r * LIGHT_COLUMNS]!;
+    const b = film.light[r * LIGHT_COLUMNS + 1]!;
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+  };
+  const top = row(0);
+  const bottom = row(LIGHT_ROWS - 1);
+  const apart = Math.hypot(top[0] - bottom[0], top[1] - bottom[1], top[2] - bottom[2]);
+  if (apart > 0.08) return { uRimTop: { value: top }, uRimBottom: { value: bottom } };
+  return { uRimTop: { value: mixVec(top, [1, 1, 1], 0.25) }, uRimBottom: { value: mixVec(bottom, [0, 0, 0], 0.3) } };
 }
 
 function mixVec(a: Vec3, b: Vec3, t: number): Vec3 {
@@ -200,8 +218,7 @@ export class Films {
         uDirection: { value: placement.side },
         uHover: { value: 0 },
         uSeed: { value: (index * 0.618) % 1 },
-        uKey: { value: key },
-        uAccent: { value: hexToLinear(film.palette.accent) },
+        ...rimGradient(film),
         uSheen: { value: sheen },
       };
       const poster = new Mesh(
@@ -396,6 +413,7 @@ export class Films {
     const dust = (title.dust.material as RawShaderMaterial).uniforms;
     dust.uPixel!.value = frame.pixel;
     dust.uTime!.value = frame.time;
+    dust.uSpeed!.value = Math.abs(frame.velocity);
   }
 
   private buildTitle(node: FilmNode, align: TitleAlign): void {
@@ -448,6 +466,7 @@ export class Films {
           uPlane: { value: [TITLE_PLANE.width, TITLE_PLANE.height] },
           uPixel: { value: 1 },
           uTime: { value: 0 },
+          uSpeed: { value: 0 },
         },
         transparent: true,
         depthTest: false,
@@ -509,6 +528,7 @@ export class Films {
             uDirection: { value: 1 },
             uSeed: { value: 0 },
             uTime: { value: 0 },
+            uSpeed: { value: 0 },
             uKey: { value: [1, 1, 1] },
           },
           // Ash is laid over the scene rather than added to it, so dense drifts never blow out.
@@ -544,6 +564,7 @@ export class Films {
       u.uDirection!.value = p.uDirection!.value;
       u.uSeed!.value = p.uSeed!.value;
       u.uTime!.value = frame.time;
+      u.uSpeed!.value = Math.abs(frame.velocity);
       u.uKey!.value = node.key;
       (u.uPlane!.value as number[])[0] = node.width;
       (u.uPlane!.value as number[])[1] = POSTER_HEIGHT;

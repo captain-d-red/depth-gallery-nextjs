@@ -42,11 +42,14 @@ const FILM_T = films.map((film, i) => {
   return (slot + (i - span.first + 0.5) / span.count) / YEARS.length;
 });
 
-/** Ruler divisions per year. The rail is a true scale, so every division is the same size. */
-const DIVISIONS = 4;
+/**
+ * Ruler divisions per year. The rail is a true scale, so every division is the same size,
+ * with a long mark on each year and a half mark between, like a steel rule.
+ */
+const DIVISIONS = 10;
 const RULER = Array.from({ length: YEARS.length * DIVISIONS + 1 }, (_, k) => ({
   t: k / (YEARS.length * DIVISIONS),
-  major: k % DIVISIONS === 0,
+  mark: k % DIVISIONS === 0 ? 'major' : k % (DIVISIONS / 2) === 0 ? 'half' : 'minor',
 }));
 
 /** The streaming site's sections. This build ships the films view, so each link returns home. */
@@ -104,7 +107,7 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
         // so the rail stays a true scale while the light slides along it.
         ticksRef.current.forEach((tick, k) => {
           const d = (RULER[k]!.t - t) * YEARS.length * DIVISIONS;
-          tick?.style.setProperty('--m', Math.exp(-d * d * 0.5).toFixed(3));
+          tick?.style.setProperty('--m', Math.exp(-d * d * 0.08).toFixed(3));
         });
         if (!moved && frame.position > 0.15) setMoved(true);
       }
@@ -157,18 +160,19 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
       >
         <span className={styles.spine} aria-hidden="true" />
         <span className={styles.ticks} aria-hidden="true">
-          {RULER.map(({ t, major }, k) => (
+          {RULER.map(({ t, mark }, k) => (
             <span
               key={t}
               ref={(el) => {
                 ticksRef.current[k] = el;
               }}
               className={styles.tick}
-              data-major={major ? '' : undefined}
+              data-mark={mark}
               style={{ '--y': t }}
             />
           ))}
         </span>
+        <span className={styles.bead} aria-hidden="true" />
         <span className={styles.playhead} aria-hidden="true" />
         <nav aria-label="Years">
           <ol className={styles.years}>

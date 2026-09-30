@@ -118,6 +118,7 @@ export class Engine {
     this.renderer.outputColorSpace = LinearSRGBColorSpace;
     this.renderer.toneMapping = NoToneMapping;
     this.renderer.setClearColor(new Color(0, 0, 0), 1);
+    Object.assign(globalThis, { __renderer: this.renderer });
 
     this.hazeTarget = createHdrTarget(0, false);
     this.mirrorTarget = createHdrTarget(0, false);

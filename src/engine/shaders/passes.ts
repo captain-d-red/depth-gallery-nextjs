@@ -53,9 +53,13 @@ void main() {
  *   way a defocused rectangle does, instead of staying razor sharp.
  * - Blur is read from the mip chain at the radius the lens asks for, through a ring of taps,
  *   so the mip levels never show as blocks.
- * - A hairline rim runs round the frame in a gradient between the film's two colours.
+ * - A hairline rim runs round the frame, graded from the colour at the top of the print to
+ *   the colour at its foot, so it continues the image rather than boxing it in.
+ * - The backlight falls off toward the frame and the paper has a fine tooth up close.
  * - Under the pointer, a clear-coat highlight slides across the print.
- * - As the camera walks through, the release front hands each fragment to its particle.
+ * - As the camera walks through, the print dissolves. Just ahead of the release front it
+ *   thins out while its particles, already in place and wearing the same colours, fade in
+ *   over it, so the image turns to grain with no visible line.
  *
  * Output is premultiplied, so the rim can glow outside the print while the print covers.
  */
@@ -76,8 +80,8 @@ uniform float uRelease;
 uniform float uDirection;
 uniform float uHover;
 uniform float uSeed;
-uniform vec3 uKey;
-uniform vec3 uAccent;
+uniform vec3 uRimTop;
+uniform vec3 uRimBottom;
 uniform vec2 uSheen;
 in vec2 vUv;
 in vec3 vWorld;
@@ -112,11 +116,8 @@ void main() {
   float rimWidth = max(0.85, coc * 0.8);
   float rim = exp(-pow((inside + 0.9) / rimWidth, 2.0)) / (1.0 + coc * 0.22);
   if (coverage < 0.002 && rim < 0.004) discard;
-  // Just ahead of the release front the print smoulders in its key colour, so the image
-  // turns to ash along a glowing seam instead of a hard cut.
   float front = uRelease > 0.0 ? releaseFront(cuv, uSeed, uDirection, uRelease) : -1.0;
   if (front > 0.0) discard;
-  float seam = smoothstep(-0.09, 0.0, front);
 
   vec3 col;
   if (coc < 0.9) {
@@ -129,15 +130,23 @@ void main() {
     col /= 10.0;
   }
 
+  // A lightbox is brightest at its centre, and the print has a paper tooth that only shows
+  // once the texture is magnified.
+  float edge = min(min(cuv.x, 1.0 - cuv.x), min(cuv.y, 1.0 - cuv.y));
+  col *= 0.9 + 0.1 * smoothstep(0.0, 0.32, edge);
+  float magnified = clamp(1.4 - uvPerPx.y * uMapSize.y, 0.0, 1.0) * (1.0 - smoothstep(1.0, 3.0, coc));
+  col *= 1.0 + (valueNoise2(cuv * uMapSize * 0.7) - 0.5) * 0.05 * magnified;
+
   // Clear coat. A broad soft sheen and a tighter core, stretched like a studio softbox.
   vec2 d = (cuv - uSheen) * vec2(1.0, 0.58);
   float spec = exp(-dot(d, d) * 6.0) * 0.16 + exp(-dot(d, d) * 55.0) * 0.14;
   col += spec * uHover * vec3(1.0, 0.98, 0.95);
 
-  col = mix(col, uKey * 2.4 + 0.25, seam * seam) + uKey * seam * 0.8;
+  // The handoff to the particles, which fade in over the print as it fades out.
+  coverage *= 1.0 - smoothstep(-HANDOFF, 0.0, front);
 
-  float along = clamp(0.5 + (puv.x - puv.y) * 0.5, 0.0, 1.0);
-  vec3 rimColour = mix(uKey, uAccent, along) * 1.35;
+  float rise = smoothstep(0.08, 0.92, puv.y);
+  vec3 rimColour = mix(uRimBottom, uRimTop, rise) * 1.35;
 
   float fog = depthFog(dist) * uFar;
   // The print's own glow is left out of the air in front of it, or it would veil its face.
@@ -175,32 +184,87 @@ void main() {
   // A soft dark halo, read from a far mip, keeps the type legible over whatever glows behind it.
   float halo = textureLod(uMap, vUv, lod + 4.0).r;
   if (coverage < 0.004 && halo < 0.01) discard;
-  if (releaseAmount(vUv, uSeed, uDirection, uProgress) > 0.0) discard;
-  float a = coverage * uOpacity;
+  float front = releaseFront(vUv, uSeed, uDirection, uProgress);
+  if (front > 0.0) discard;
+  float a = coverage * uOpacity * (1.0 - smoothstep(-HANDOFF, 0.0, front));
   float shade = min(halo * 1.6, 1.0) * 0.5 * uOpacity;
   fragColor = vec4(uInk * exp(-uExtinction * dist) * a, max(a, shade));
 }
 `;
 
 /**
- * Motion shared by every released particle. A grain leaves its surface, is caught in the
- * wake of the passing camera and swirls round the view axis, spreading outward, while a
- * noise field breaks the swirl into eddies. Travel eases out, so grains slow as they drift.
+ * Motion shared by every particle, poster or title.
+ *
+ * 1. The camera's wake pushes a particle gently outward and spins it round the view axis.
+ * 2. A flow field carries it along streamlines. The field comes from a stream function, the
+ *    sum of three travelling waves, and its velocity is the curl of that function:
+ *
+ *        psi = sum of a * sin(k . p + w t + phase)
+ *        v   = ( d psi / dy , -d psi / dx )
+ *
+ *    A curl has no divergence, so particles swirl and stream but never bunch up or thin out,
+ *    which is what makes the motion read as a fluid rather than as scattered noise. The path
+ *    is integrated in four steps, so it curves.
+ * 3. It lifts a little, as warm air would, and drifts in depth.
+ *
+ * Every term scales with travel, which eases in, so a particle leaves its surface slowly.
  */
-const wake = glsl`
-vec3 wakeOffset(vec3 world, vec3 camera, float r, vec3 swirl, float seed, float direction, float strength) {
-  float travel = 1.0 - exp(-r * 1.9);
-  vec2 rel = world.xy - camera.xy;
-  float radius = length(rel) + 1e-3;
-  float spin = travel * (0.6 + 0.5 * swirl.x) * 1.25 / (radius + 0.45) * direction * strength;
+const drift = glsl`
+vec2 streamFlow(vec2 p, float t) {
+  const vec2 k1 = vec2(1.9, 2.6);
+  const vec2 k2 = vec2(-3.4, 1.4);
+  const vec2 k3 = vec2(2.6, -5.1);
+  float c1 = 0.5 * cos(dot(k1, p) + t * 0.31 + 1.3);
+  float c2 = 0.28 * cos(dot(k2, p) - t * 0.23 + 4.1);
+  float c3 = 0.14 * cos(dot(k3, p) + t * 0.19 + 2.7);
+  return c1 * vec2(k1.y, -k1.x) + c2 * vec2(k2.y, -k2.x) + c3 * vec2(k3.y, -k3.x);
+}
+
+vec3 particlePath(vec3 rest, vec3 camera, float r, float seed, float direction, float strength, float time) {
+  float travel = pow(r, 1.35) * strength;
+  vec2 rel = rest.xy - camera.xy;
+  float spin = travel * 0.9 / (length(rel) + 0.5) * direction;
   float c = cos(spin);
   float s = sin(spin);
-  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.3 + 0.35 * seed) * strength);
-  vec3 moved = vec3(camera.xy + rel, world.z);
-  moved += swirl * 0.42 * travel * strength;
-  moved.z += travel * (0.1 + 0.3 * seed) * strength;
-  moved.y += r * r * 0.1;
-  return moved;
+  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.22 + 0.3 * seed));
+  vec3 p = vec3(camera.xy + rel, rest.z);
+  float stride = travel * 0.075;
+  for (int i = 0; i < 4; i++) p.xy += streamFlow(p.xy * 1.3 + seed * 0.35, time + float(i) * 0.4) * stride;
+  p.y += travel * travel * 0.12;
+  p.z += travel * (0.08 + 0.26 * seed);
+  return p;
+}
+
+/**
+ * Places a particle's sprite in view space. It grows into a bokeh disc when defocused, and
+ * stretches along its own path when it moves fast, the way a shutter records motion.
+ */
+struct Sprite {
+  vec4 view;
+  float bokeh;
+  float stretch;
+  float energy;
+};
+
+Sprite placeSprite(vec3 p, vec3 before, float grainPx, vec2 corner) {
+  Sprite sp;
+  vec4 view = viewMatrix * vec4(p, 1.0);
+  vec4 prev = viewMatrix * vec4(before, 1.0);
+  float depth = max(-view.z, 0.05);
+  float coc = circleOfConfusion(depth);
+  float radiusPx = max(grainPx, coc);
+  float size = radiusPx * uPxToView * depth;
+  vec2 motion = view.xy - prev.xy;
+  float len = length(motion);
+  vec2 dir = len > 1e-6 ? motion / len : vec2(0.0, 1.0);
+  float streak = min(len * 0.5, size * 5.0);
+  vec2 nrm = vec2(-dir.y, dir.x);
+  view.xy += nrm * corner.x * size + dir * corner.y * (size + streak) - motion * 0.5;
+  sp.view = view;
+  sp.bokeh = smoothstep(2.0, 5.0, coc / max(grainPx, 0.5));
+  sp.stretch = streak / (size + streak);
+  sp.energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.02, 1.0);
+  return sp;
 }
 `;
 
@@ -216,19 +280,23 @@ float spriteShape(vec2 p, float bokeh) {
 `;
 
 /**
- * The poster's own ash. One grain per cell of a grid over the print, coloured from the same
- * image, so the frame stays whole until the release front reaches a cell. A grain near the
- * focal plane stays a crisp speck, and a grain that drifts toward the lens opens into a soft
- * bokeh disc whose light spreads over its whole area, as it would through a real lens.
+ * The poster's particles. One per cell of a grid over the print, coloured from the same image.
+ *
+ * - A particle appears in place just ahead of the release front, while the print fades out
+ *   under it, so the handoff is invisible.
+ * - Once released it travels the shared path: the camera's wake, then the flow field.
+ * - It keeps the print's colour and slowly takes on the film's key as it fades, so the image
+ *   dissolves into the colour of the air it lit.
+ * - Near the lens it opens into a soft bokeh disc, and at speed it streaks along its path.
  */
 export const posterDustVertex = glsl`${header}
 ${noise}
 ${release}
 ${lens}
-${wake}
 uniform mat4 modelMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 projectionMatrix;
+${drift}
 uniform vec3 cameraPosition;
 uniform sampler2D uAtlas;
 uniform vec4 uAtlasRect;
@@ -240,6 +308,7 @@ uniform float uRelease;
 uniform float uDirection;
 uniform float uSeed;
 uniform float uTime;
+uniform float uSpeed;
 uniform vec3 uKey;
 in vec3 position;
 in vec3 aCell;
@@ -247,77 +316,82 @@ out vec3 vColor;
 out vec2 vLocal;
 out float vAlpha;
 out float vBokeh;
+out float vStretch;
 
 void main() {
-  vec2 uv = aCell.xy;
-  float r = releaseAmount(uv, uSeed, uDirection, uRelease);
+  // Each particle sits at a random spot inside its cell, so the rest pattern is never a grid.
+  vec2 jitter = vec2(fract(aCell.z * 12.9898), fract(aCell.z * 78.233)) - 0.5;
+  vec2 uv = clamp(aCell.xy + jitter / uGrid, 0.0, 1.0);
+  float front = releaseFront(uv, uSeed, uDirection, uRelease) + releaseJitter(aCell.z);
   vLocal = position.xy;
-  if (r <= 0.0 || r >= 1.0) {
+  vBokeh = 0.0;
+  vStretch = 0.0;
+  if (front <= -HANDOFF || front >= 1.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     vColor = vec3(0.0);
     vAlpha = 0.0;
-    vBokeh = 0.0;
     return;
   }
+  float r = clamp(front, 0.0, 1.0);
   vec3 image = mix(
     textureLod(uAtlas, uAtlasRect.xy + uv * uAtlasRect.zw, 0.0).rgb,
     textureLod(uMap, uv, 2.0).rgb,
     uMapMix
   );
 
-  vec4 world = modelMatrix * vec4((uv.x - 0.5) * uPlane.x, (uv.y - 0.5) * uPlane.y, 0.0, 1.0);
-  vec3 q = vec3(uv * vec2(4.0, 6.0), aCell.z * 5.0 + uSeed * 3.0 + uTime * 0.05);
-  vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 23.4), valueNoise3(q + 51.9)) - 0.5;
-  // Grains peel away slowly, then the wake takes them.
-  world.xyz = wakeOffset(world.xyz, cameraPosition, pow(r, 1.45), swirl, aCell.z, uDirection, 1.0);
+  vec3 rest = (modelMatrix * vec4((uv.x - 0.5) * uPlane.x, (uv.y - 0.5) * uPlane.y, 0.0, 1.0)).xyz;
+  float t = uTime * 0.5;
+  vec3 p = particlePath(rest, cameraPosition, r, aCell.z, uDirection, 1.0, t);
+  vec3 before = particlePath(rest, cameraPosition, max(r - min(uSpeed * 0.05, 0.1), 0.0), aCell.z, uDirection, 1.0, t);
+  float depth = max(-(viewMatrix * vec4(p, 1.0)).z, 0.05);
+  float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.4 + 0.45 * fract(aCell.z * 5.31)) * (1.0 - r * 0.35);
+  Sprite sp = placeSprite(p, before, grainPx, position.xy);
+  gl_Position = projectionMatrix * sp.view;
 
-  vec4 view = viewMatrix * world;
-  float depth = max(-view.z, 0.05);
-  float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.62 - r * 0.3);
-  float coc = circleOfConfusion(depth);
-  float radiusPx = max(grainPx, coc);
-  view.xy += position.xy * radiusPx * uPxToView * depth;
-  gl_Position = projectionMatrix * view;
-
-  // A grain leaves the seam still glowing in the key colour, then cools into ash.
-  float ember = 1.0 - smoothstep(0.0, 0.22, r);
-  vec3 colour = image * (1.0 - 0.45 * r) + uKey * ember * 1.6;
-  float glint = step(0.975, aCell.z) * pow(max(sin(uTime * 5.0 + aCell.z * 91.0), 0.0), 24.0) * 3.0;
-  float energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.02, 1.0);
-  vColor = colour * (1.0 + glint);
-  vBokeh = smoothstep(2.0, 5.0, coc / max(grainPx, 0.5));
+  float lift = 1.0 + 0.3 * sin(r * 3.14159);
+  vColor = mix(image, uKey, smoothstep(0.2, 0.95, r) * 0.55) * (1.0 - 0.3 * r) * lift;
+  vBokeh = sp.bokeh;
+  vStretch = sp.stretch;
+  float appear = smoothstep(-HANDOFF, 0.0, front);
   float nearFade = smoothstep(0.35, 1.2, depth);
-  vAlpha = pow(1.0 - r, 1.8) * smoothstep(0.0, 0.04, r) * nearFade * energy;
+  vAlpha = appear * pow(1.0 - r, 1.6) * nearFade * sp.energy * (1.0 - 0.5 * sp.stretch);
 }
 `;
 
+/**
+ * A particle is a soft gaussian speck, stretched along its motion when it moves fast, and a
+ * defocused one is a disc with a faint bright rim. It is half laid over and half added to
+ * the scene, so it glows like the print it came from without ever blowing out.
+ */
 export const posterDustFragment = glsl`${header}
 ${bokehSprite}
 in vec3 vColor;
 in vec2 vLocal;
 in float vAlpha;
 in float vBokeh;
+in float vStretch;
 out vec4 fragColor;
 void main() {
   if (vAlpha <= 0.0) discard;
-  float a = spriteShape(vLocal, vBokeh) * vAlpha;
+  vec2 p = vec2(vLocal.x, vLocal.y * mix(1.0, 0.6, vStretch));
+  float a = spriteShape(p, vBokeh) * vAlpha;
   if (a < 0.002) discard;
-  fragColor = vec4(vColor * a, a);
+  fragColor = vec4(vColor * a, a * 0.5);
 }
 `;
 
 /**
- * One particle per sampled glyph pixel. It waits invisibly until the release front reaches
- * it, then puffs away in the same wake as the poster ash, lighter and quicker.
+ * One particle per sampled glyph pixel. It appears in place as its glyph fades, then travels
+ * the same path as the poster particles, lighter and quicker.
  */
 export const titleDustVertex = glsl`${header}
 ${noise}
 ${release}
 ${lens}
-${wake}
 uniform mat4 modelMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 projectionMatrix;
+${drift}
 uniform vec3 cameraPosition;
 uniform vec2 uPlane;
 uniform float uProgress;
@@ -325,36 +399,34 @@ uniform float uSeed;
 uniform float uDirection;
 uniform float uPixel;
 uniform float uTime;
+uniform float uSpeed;
 in vec3 position;
 in vec4 aPoint;
 out vec2 vLocal;
 out float vAlpha;
 out float vBokeh;
+out float vStretch;
 
 void main() {
-  float r = releaseAmount(aPoint.xy, uSeed, uDirection, uProgress);
+  float front = releaseFront(aPoint.xy, uSeed, uDirection, uProgress) + releaseJitter(aPoint.z);
   vLocal = position.xy;
-  if (r <= 0.0 || r >= 1.0) {
+  vBokeh = 0.0;
+  vStretch = 0.0;
+  if (front <= -HANDOFF || front >= 1.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     vAlpha = 0.0;
-    vBokeh = 0.0;
     return;
   }
-  vec4 world = modelMatrix * vec4((aPoint.x - 0.5) * uPlane.x, (aPoint.y - 0.5) * uPlane.y, 0.0, 1.0);
-  vec3 q = vec3(aPoint.xy * vec2(7.0, 3.5), aPoint.z * 9.0 + uSeed + uTime * 0.06);
-  vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 19.1), valueNoise3(q + 41.7)) - 0.5;
-  world.xyz = wakeOffset(world.xyz, cameraPosition, r, swirl, aPoint.z, -uDirection, 0.75);
-
-  vec4 view = viewMatrix * world;
-  float depth = max(-view.z, 0.05);
-  float grainPx = uPixel * aPoint.w * (1.0 + r * 1.6);
-  float coc = circleOfConfusion(depth);
-  float radiusPx = max(grainPx, coc);
-  view.xy += position.xy * radiusPx * uPxToView * depth;
-  gl_Position = projectionMatrix * view;
-  vBokeh = smoothstep(1.6, 4.0, coc / max(grainPx, 0.5));
-  float energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.05, 1.0);
-  vAlpha = pow(1.0 - r, 1.6) * smoothstep(0.0, 0.06, r) * energy;
+  float r = clamp(front, 0.0, 1.0);
+  vec3 rest = (modelMatrix * vec4((aPoint.x - 0.5) * uPlane.x, (aPoint.y - 0.5) * uPlane.y, 0.0, 1.0)).xyz;
+  float t = uTime * 0.5 + uSeed * 10.0;
+  vec3 p = particlePath(rest, cameraPosition, r, aPoint.z, -uDirection, 0.75, t);
+  vec3 before = particlePath(rest, cameraPosition, max(r - min(uSpeed * 0.05, 0.1), 0.0), aPoint.z, -uDirection, 0.75, t);
+  Sprite sp = placeSprite(p, before, uPixel * aPoint.w * (1.0 + r * 1.4), position.xy);
+  gl_Position = projectionMatrix * sp.view;
+  vBokeh = sp.bokeh;
+  vStretch = sp.stretch;
+  vAlpha = smoothstep(-HANDOFF, 0.0, front) * pow(1.0 - r, 1.6) * sp.energy * (1.0 - 0.5 * sp.stretch);
 }
 `;
 
@@ -365,10 +437,12 @@ uniform float uOpacity;
 in vec2 vLocal;
 in float vAlpha;
 in float vBokeh;
+in float vStretch;
 out vec4 fragColor;
 void main() {
   if (vAlpha <= 0.0) discard;
-  float a = spriteShape(vLocal, vBokeh) * vAlpha * uOpacity;
+  vec2 p = vec2(vLocal.x, vLocal.y * mix(1.0, 0.6, vStretch));
+  float a = spriteShape(p, vBokeh) * vAlpha * uOpacity;
   if (a < 0.002) discard;
   fragColor = vec4(uInk * a, 1.0);
 }
@@ -390,11 +464,11 @@ void main() {
 /**
  * A dark polished floor that grounds the room.
  *
- * - Reflections come from a mirrored render of the posters, read in screen space and smeared
- *   mostly vertically, the way polished stone stretches a reflection toward the viewer.
+ * - Reflections come from a mirrored render of the posters, read in screen space. The floor
+ *   is polished, so the image stays a true mirror, softened by a small glossy lobe that is
+ *   taller than it is wide, because a lobe seen at a grazing angle stretches toward the eye.
  * - A Schlick Fresnel term makes the floor mirror-like at grazing angles and matte underfoot.
  * - Each poster light casts a Lambertian pool of its colour onto the floor in front of it.
- * - Slow low-frequency noise varies the roughness, so the sheen is never uniform plastic.
  *
  * Output is premultiplied, because the far floor fades into the haze behind it.
  */
@@ -415,15 +489,14 @@ void main() {
   vec3 rd = toFrag / dist;
   vec2 suv = gl_FragCoord.xy / uResolution;
 
-  float rough = 0.45 + 0.55 * valueNoise2(vWorld.xz * vec2(0.7, 0.45) + 3.1);
-  vec2 wobble = (vec2(valueNoise2(vWorld.xz * 11.0), valueNoise2(vWorld.xz * 11.0 + 5.7)) - 0.5) * 0.004;
   vec3 reflection = vec3(0.0);
   float weight = 0.0;
-  for (int i = -5; i <= 5; i++) {
-    float t = float(i) / 5.0;
-    float w = exp(-t * t * 2.2);
-    reflection += texture(uReflection, suv + wobble + vec2(t * 0.003, t * 0.034) * rough).rgb * w;
-    weight += w;
+  for (int j = -4; j <= 4; j++) {
+    for (int i = -1; i <= 1; i++) {
+      float w = exp(-float(j * j) * 0.2 - float(i * i) * 0.9);
+      reflection += texture(uReflection, suv + vec2(float(i) * 0.0014, float(j) * 0.0036)).rgb * w;
+      weight += w;
+    }
   }
   reflection /= weight;
   float cosView = clamp(-rd.y, 0.0, 1.0);

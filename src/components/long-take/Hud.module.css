@@ -211,20 +211,42 @@
   inset: 0;
 }
 
-/* A true scale. Year ticks are long, the three divisions between them short and even. */
+/*
+ * A true scale. Ten equal divisions per year, with a long mark on the year, a half mark at
+ * the middle and short marks between. Lengths never change. Only light moves along it.
+ */
 .tick {
   position: absolute;
   right: 0;
   top: calc(var(--y) * 100%);
-  width: 0.7em;
+  width: 0.45em;
   height: 1px;
   background: color-mix(in oklab, var(--key) calc(var(--m, 0) * 100%), var(--paper));
-  opacity: calc(0.22 + var(--m, 0) * 0.7);
+  opacity: calc(0.18 + var(--m, 0) * 0.72);
 }
 
-.tick[data-major] {
+.tick[data-mark='half'] {
+  width: 0.8em;
+  opacity: calc(0.3 + var(--m, 0) * 0.65);
+}
+
+.tick[data-mark='major'] {
   width: 1.5em;
-  opacity: calc(0.42 + var(--m, 0) * 0.55);
+  opacity: calc(0.5 + var(--m, 0) * 0.5);
+}
+
+/* A soft light that slides along the spine with the playhead. */
+.bead {
+  position: absolute;
+  right: -1px;
+  top: calc(var(--t, 0) * 100%);
+  width: 3px;
+  height: 5.5em;
+  border-radius: 3px;
+  background: linear-gradient(transparent, var(--key) 50%, transparent);
+  filter: blur(1px);
+  opacity: 0.85;
+  transform: translateY(-50%);
 }
 
 .playhead {

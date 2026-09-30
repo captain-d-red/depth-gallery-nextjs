@@ -155,17 +155,24 @@ vec3 inscatter(vec3 ro, vec3 rd, float tMax, vec2 density) {
 `;
 
 /**
- * How far text has broken into dust at a given progress. Titles and their particles call the
- * same function, so a glyph fragment disappears at exactly the moment its particle leaves.
- * The front sweeps across the surface, broken up by broad noise into drifts and by fine noise
- * at particle scale, so the edge crumbles grain by grain instead of cutting a clean line.
+ * Where the release front stands at a point of a surface, as a signed distance: negative
+ * before the front arrives, zero at the front, one when a released particle ends its flight.
+ * The front sweeps across the surface and broad noise breaks it into drifts. The surface
+ * fades smoothly on this front, and each particle adds its own jitter to the timing, so the
+ * grain lives in the particles and never shows as blocks in the print.
  */
 export const release = glsl`
+/** How far ahead of the front a particle appears in place while the surface fades under it. */
+const float HANDOFF = 0.1;
+
+/** Each particle leaves a little early or late, which scatters the front into grain. */
+float releaseJitter(float seed) {
+  return (seed - 0.5) * 0.16;
+}
+
 float releaseFront(vec2 uv, float seed, float direction, float progress) {
   float sweep = direction > 0.0 ? uv.x : 1.0 - uv.x;
-  float threshold = 0.56 * sweep
-    + 0.32 * valueNoise2(uv * vec2(13.0, 6.5) + seed * 13.7)
-    + 0.12 * valueNoise2(uv * vec2(70.0, 105.0) + seed * 5.1);
+  float threshold = 0.62 * sweep + 0.38 * valueNoise2(uv * vec2(9.0, 5.0) + seed * 13.7);
   return (progress * 1.42 - threshold) / 0.42;
 }
 
