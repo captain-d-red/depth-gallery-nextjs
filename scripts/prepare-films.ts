@@ -11,7 +11,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import sharp from 'sharp';
+import sharp, { type OverlayOptions } from 'sharp';
 import {
   type Vec3,
   linearSrgbToOklab,
@@ -129,7 +129,7 @@ async function main() {
   titles.sort((a, b) => a.year - b.year || keyHue(a) - keyHue(b));
 
   const rows = Math.ceil(titles.length / ATLAS_COLUMNS);
-  const atlasTiles: sharp.OverlayOptions[] = [];
+  const atlasTiles: OverlayOptions[] = [];
   const films = [];
 
   for (const [index, t] of titles.entries()) {

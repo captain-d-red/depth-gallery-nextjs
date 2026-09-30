@@ -113,9 +113,11 @@ export class Engine {
       uLightPos: { value: new Float32Array(MAX_LIGHTS * 4) },
       uLightCol: { value: new Float32Array(MAX_LIGHTS * 4) },
       uLightCount: { value: 0 },
-      uScatter: { value: 0.034 },
-      uExtinction: { value: 0.052 },
+      uScatter: { value: 0.03 },
+      uExtinction: { value: 0.03 },
       uSoft: { value: 0.05 },
+      uFalloff: { value: 0.85 },
+      uDepthFog: { value: 0.46 },
       uTime: { value: 0 },
     };
     const cameraUniforms = {
@@ -259,7 +261,7 @@ export class Engine {
     const a = this.shades[i0] ?? this.shades[0]!;
     const b = this.shades[Math.min(i0 + 1, this.shades.length - 1)] ?? a;
     const f = position - i0;
-    (this.hazePass.uAmbient!.value as Vector3).set(lerp(a[0], b[0], f), lerp(a[1], b[1], f), lerp(a[2], b[2], f)).multiplyScalar(0.55 * lightLevel + 0.08);
+    (this.hazePass.uAmbient!.value as Vector3).set(lerp(a[0], b[0], f), lerp(a[1], b[1], f), lerp(a[2], b[2], f)).multiplyScalar(0.3 * lightLevel + 0.04);
 
     this.writeCameraUniforms();
     this.dust.update({

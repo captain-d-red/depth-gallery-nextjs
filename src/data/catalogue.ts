@@ -45,30 +45,47 @@ function fail(message: string): never {
   throw new Error(`films.json: ${message}`);
 }
 
-function isNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
+const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+const isHex = (value: unknown): boolean => isString(value) && /^#[0-9a-f]{6}$/i.test(value);
+
+function assertFilm(film: unknown, i: number): void {
+  if (!isRecord(film) || !isString(film.slug) || !isString(film.title)) fail(`film ${i} has no slug or title`);
+  const { slug } = film;
+  if (!isNumber(film.year) || !isNumber(film.minutes)) fail(`${slug} has no year or runtime`);
+  if (!isString(film.director) || !isString(film.logline) || !Array.isArray(film.genres)) fail(`${slug} is missing credits`);
+  if (!isRecord(film.image) || !isString(film.image.src) || !isNumber(film.image.width) || !isNumber(film.image.height)) {
+    fail(`${slug} has no image`);
+  }
+  if (!isNumber(film.atlasIndex)) fail(`${slug} has no atlas cell`);
+  const light: unknown = film.light;
+  const samples = LIGHT_COLUMNS * LIGHT_ROWS;
+  if (!Array.isArray(light) || light.length !== samples || !light.every((s) => Array.isArray(s) && s.length === 4 && s.every(isNumber))) {
+    fail(`${slug} needs ${samples} light samples of four numbers`);
+  }
+  if (!isRecord(film.palette) || !isHex(film.palette.key) || !isHex(film.palette.fill) || !isHex(film.palette.shade)) {
+    fail(`${slug} has an incomplete grade palette`);
+  }
 }
 
 /**
  * Checks the generated catalogue once at module load, so a broken build of the data
  * fails loudly here instead of surfacing as a black poster somewhere in the scene.
  */
-export function parseCatalogue(input: unknown): Catalogue {
-  const data = input as Partial<Catalogue> | null;
-  if (!data?.atlas || !Array.isArray(data.films)) fail('missing atlas or films');
-  const { atlas } = data;
-  if (!isNumber(atlas.columns) || !isNumber(atlas.cellWidth) || !isNumber(atlas.cellHeight)) {
-    fail('atlas geometry is incomplete');
+export function assertCatalogue(input: unknown): asserts input is Catalogue {
+  if (!isRecord(input) || !isRecord(input.atlas) || !Array.isArray(input.films)) fail('missing atlas or films');
+  const { atlas } = input;
+  if (!isString(atlas.src)) fail('atlas has no source');
+  for (const key of ['columns', 'cellWidth', 'cellHeight', 'width', 'height']) {
+    if (!isNumber(atlas[key])) fail(`atlas.${key} is not a number`);
   }
-  data.films.forEach((film, i) => {
-    if (typeof film.slug !== 'string' || typeof film.title !== 'string') fail(`film ${i} has no slug or title`);
-    if (!isNumber(film.year) || !isNumber(film.minutes)) fail(`${film.slug} has no year or runtime`);
-    if (!isNumber(film.image?.width) || !isNumber(film.image?.height)) fail(`${film.slug} has no image size`);
-    if (film.light?.length !== LIGHT_COLUMNS * LIGHT_ROWS || !film.light.every((s) => s.length === 4 && s.every(isNumber))) {
-      fail(`${film.slug} needs ${LIGHT_COLUMNS * LIGHT_ROWS} light samples of four numbers`);
-    }
-  });
-  return data as Catalogue;
+  input.films.forEach(assertFilm);
+}
+
+function parseCatalogue(input: unknown): Catalogue {
+  assertCatalogue(input);
+  return input;
 }
 
 export const catalogue: Catalogue = parseCatalogue(raw);

@@ -103,6 +103,9 @@ float fbm2(vec2 p) {
  * in front of its own plane, and the segment behind the plane is cut off. Light samples are
  * softened so a ray that grazes a sample never blows out, and a slowly moving noise field
  * modulates the density so the air visibly drifts.
+ *
+ * Past the framed distance a second, denser fog term takes over, so deeper posters sink
+ * into the dark the way far objects do in a smoky room.
  */
 export const haze = glsl`
 uniform vec4 uLightPos[${MAX_LIGHTS}];
@@ -111,6 +114,8 @@ uniform int uLightCount;
 uniform float uScatter;
 uniform float uExtinction;
 uniform float uSoft;
+uniform float uFalloff;
+uniform float uDepthFog;
 uniform float uTime;
 
 vec2 hazeNoise(vec3 ro, vec3 rd) {
@@ -118,6 +123,10 @@ vec2 hazeNoise(vec3 ro, vec3 rd) {
   float a = fbm3((ro + rd * 2.4) * 0.62 + drift);
   float b = fbm3((ro + rd * 7.0) * 0.38 + drift * 0.7 + 11.0);
   return vec2(0.35 + 1.3 * a, 0.35 + 1.3 * b);
+}
+
+float depthFog(float dist) {
+  return exp(-uExtinction * dist - uDepthFog * max(dist - 3.9, 0.0));
 }
 
 vec3 inscatter(vec3 ro, vec3 rd, float tMax, vec2 density) {
@@ -136,7 +145,8 @@ vec3 inscatter(vec3 ro, vec3 rd, float tMax, vec2 density) {
     float b = dot(op, rd);
     float h = sqrt(max(dot(op, op) - b * b, 0.0) + uSoft);
     float line = (atan((tEnd - b) / h) + atan(b / h)) / h;
-    float fog = exp(-uExtinction * max(b, 0.0));
+    // Light also dims on its way out from the poster, which keeps each glow close to its frame.
+    float fog = exp(-uExtinction * max(b, 0.0) - uFalloff * h);
     float d = mix(density.x, density.y, smoothstep(1.5, 7.5, b));
     sum += uLightCol[i].rgb * (line * fog * d);
   }

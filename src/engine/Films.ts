@@ -24,6 +24,8 @@ import { hexToLinear, type Vec3 } from '@/lib/color';
 import { clamp, damp, lerp, smoothstep } from '@/lib/math';
 import { POSTER_HEIGHT, placeFilm, type Placement } from './layout';
 import {
+  posterDustFragment,
+  posterDustVertex,
   posterFragment,
   posterVertex,
   titleDustFragment,
@@ -41,6 +43,8 @@ export interface HazeUniforms {
   readonly uScatter: IUniform<number>;
   readonly uExtinction: IUniform<number>;
   readonly uSoft: IUniform<number>;
+  readonly uFalloff: IUniform<number>;
+  readonly uDepthFog: IUniform<number>;
   readonly uTime: IUniform<number>;
 }
 
@@ -73,13 +77,15 @@ interface FilmNode {
   readonly poster: Mesh<PlaneGeometry, RawShaderMaterial>;
   readonly posterUniforms: Record<string, IUniform>;
   readonly width: number;
-  readonly edge: Vec3;
   readonly ink: Vec3;
   map: Texture | null;
   bitmap: ImageBitmap | null;
   mapState: LoadState;
   hover: number;
+  /** How formed the poster is, one when framed or approaching and zero once it is dust. */
   visible: number;
+  /** How far the poster has broken into dust as the camera walks through it. */
+  release: number;
   title: { mesh: Mesh; dust: Mesh; texture: DataTexture; align: TitleAlign } | null;
   titleWanted: boolean;
 }
@@ -90,6 +96,11 @@ const STREAM_BEHIND = 1;
 const KEEP_AHEAD = 10;
 const KEEP_BEHIND = 3;
 const MAX_LOADS = 4;
+
+/** Particles laid over a poster, roughly one per 11 world millimetres. */
+const DUST_GRID = { columns: 88, rows: 132 } as const;
+/** Two posters at most are ever breaking up at once, so two particle systems are pooled. */
+const DUST_POOL = 2;
 
 const PAPER: Vec3 = hexToLinear('#efe8dc');
 const tmp = new Vector3();
@@ -109,6 +120,7 @@ export class Films {
   private readonly nodes: FilmNode[];
   private readonly titleGeometry = new PlaneGeometry(TITLE_PLANE.width, TITLE_PLANE.height);
   private readonly dustQuad = createQuadGeometry();
+  private readonly posterDust: Mesh<InstancedBufferGeometry, RawShaderMaterial>[];
   private readonly abort = new AbortController();
   private loads = 0;
   private titleBudget = 1;
@@ -139,11 +151,12 @@ export class Films {
         uAtlasRect: { value: [col / a.columns, 1 - (row + 1) / rows, 1 / a.columns, 1 / rows] },
         uMap: { value: blank },
         uMapMix: { value: 0 },
-        uVisible: { value: 1 },
+        uFar: { value: 1 },
+        uRelease: { value: 0 },
+        uDirection: { value: placement.side },
         uGlow: { value: 1 },
         uHover: { value: 0 },
         uSeed: { value: (index * 0.618) % 1 },
-        uEdge: { value: mixVec(key, [1, 0.8, 0.55], 0.35) },
       };
       const material = new RawShaderMaterial({
         glslVersion: GLSL3,
@@ -162,16 +175,88 @@ export class Films {
         poster,
         posterUniforms: uniforms,
         width,
-        edge: key,
         ink: mixVec(PAPER, key, 0.14),
         map: null,
         bitmap: null,
         mapState: 'idle' as LoadState,
         hover: 0,
         visible: 0,
+        release: 0,
         title: null,
         titleWanted: false,
       };
+    });
+    this.posterDust = this.createPosterDust();
+  }
+
+  /** One grid of particle cells, shared by every pooled dust system. */
+  private createPosterDust(): Mesh<InstancedBufferGeometry, RawShaderMaterial>[] {
+    const { columns, rows } = DUST_GRID;
+    const cells = new Float32Array(columns * rows * 3);
+    for (let r = 0, i = 0; r < rows; r++) {
+      for (let c = 0; c < columns; c++, i += 3) {
+        cells[i] = (c + 0.5) / columns;
+        cells[i + 1] = (r + 0.5) / rows;
+        cells[i + 2] = Math.random();
+      }
+    }
+    const geometry = new InstancedBufferGeometry();
+    geometry.index = this.dustQuad.index;
+    geometry.setAttribute('position', this.dustQuad.getAttribute('position'));
+    geometry.setAttribute('aCell', new InstancedBufferAttribute(cells, 3));
+    geometry.instanceCount = columns * rows;
+
+    return Array.from({ length: DUST_POOL }, () => {
+      const mesh = new Mesh(
+        geometry,
+        new RawShaderMaterial({
+          glslVersion: GLSL3,
+          vertexShader: posterDustVertex,
+          fragmentShader: posterDustFragment,
+          uniforms: {
+            uAtlas: this.atlas,
+            uAtlasRect: { value: [0, 0, 1, 1] },
+            uMap: { value: null },
+            uMapMix: { value: 0 },
+            uPlane: { value: [1, 1] },
+            uGrid: { value: [columns, rows] },
+            uRelease: { value: 0 },
+            uDirection: { value: 1 },
+            uSeed: { value: 0 },
+          },
+          transparent: true,
+          depthWrite: false,
+          blending: AdditiveBlending,
+        }),
+      );
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      mesh.renderOrder = 5;
+      this.group.add(mesh);
+      return mesh;
+    });
+  }
+
+  /** Hands the pooled particle systems to the posters that are breaking up this frame. */
+  private assignPosterDust(): void {
+    const breaking = this.nodes.filter((n) => n.release > 0.001 && n.release < 0.999 && n.poster.visible).slice(0, DUST_POOL);
+    this.posterDust.forEach((mesh, i) => {
+      const node = breaking[i];
+      mesh.visible = node !== undefined;
+      if (!node) return;
+      mesh.position.copy(node.poster.position);
+      mesh.rotation.copy(node.poster.rotation);
+      mesh.scale.copy(node.poster.scale);
+      const u = mesh.material.uniforms;
+      const p = node.posterUniforms;
+      u.uAtlasRect!.value = p.uAtlasRect!.value;
+      u.uMap!.value = p.uMap!.value;
+      u.uMapMix!.value = p.uMapMix!.value;
+      u.uRelease!.value = node.release;
+      u.uDirection!.value = p.uDirection!.value;
+      u.uSeed!.value = p.uSeed!.value;
+      (u.uPlane!.value as number[])[0] = node.width;
+      (u.uPlane!.value as number[])[1] = POSTER_HEIGHT;
     });
   }
 
@@ -196,14 +281,16 @@ export class Films {
     // Titles nearest the camera are set first, so the one being approached is never late.
     const order = [...this.nodes].sort((a, b) => Math.abs(a.index - frame.position) - Math.abs(b.index - frame.position));
     for (const node of order) this.updateNode(node, frame, tilt, stack);
+    this.assignPosterDust();
   }
 
   private updateNode(node: FilmNode, frame: FilmsFrame, tilt: number, stack: boolean): void {
     const { placement, poster, posterUniforms: u, index } = node;
     const zDist = frame.cameraZ - placement.z;
-    const visible = smoothstep(0.4, 1.75, zDist) * (1 - smoothstep(22, 30, zDist));
-    node.visible = visible;
-    poster.visible = visible > 0.001;
+    const far = 1 - smoothstep(22, 30, zDist);
+    node.release = 1 - smoothstep(0.85, 2.95, zDist);
+    node.visible = far * (1 - node.release);
+    poster.visible = far > 0.001 && node.release < 0.999;
 
     const scale = stack ? 0.78 : 1;
     const x = stack ? 0 : placement.x;
@@ -213,7 +300,8 @@ export class Films {
     poster.scale.setScalar(scale);
 
     node.hover = damp(node.hover, frame.hovered === index ? 1 : 0, 10, frame.dt);
-    u.uVisible!.value = visible;
+    u.uFar!.value = far;
+    u.uRelease!.value = node.release;
     u.uHover!.value = node.hover;
 
     // Stream the full poster near the camera, and let go of it once it is well behind.
@@ -284,7 +372,7 @@ export class Films {
   }
 
   private buildTitle(node: FilmNode, align: TitleAlign): void {
-    const art = drawTitleArt(node.film, node.index + 1, this.nodes.length, this.fontFamily, align);
+    const art = drawTitleArt(node.film, this.fontFamily, align);
     const texture = new DataTexture(art.coverage, art.width, art.height, RedFormat, UnsignedByteType);
     texture.minFilter = LinearMipmapLinearFilter;
     texture.magFilter = LinearFilter;
@@ -432,6 +520,8 @@ export class Films {
       node.poster.material.dispose();
     }
     this.titleGeometry.dispose();
+    this.posterDust[0]?.geometry.dispose();
+    for (const mesh of this.posterDust) mesh.material.dispose();
     this.dustQuad.dispose();
   }
 }

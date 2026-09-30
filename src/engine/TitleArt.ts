@@ -36,11 +36,11 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
 }
 
 /**
- * Sets one film's card: an eyebrow with its place in the take, the title at the largest
- * size that fits in three lines, then the director, runtime and logline. Everything is drawn
+ * Sets one film's card: an eyebrow with its genres, the title at the largest size that fits
+ * in three lines, then the director and runtime, then the logline. Everything is drawn
  * white, since only coverage is kept and the ink colour is applied in the shader.
  */
-export function drawTitleArt(film: Film, ordinal: number, total: number, fontFamily: string, align: TitleAlign, maxPoints = 6000): TitleArt {
+export function drawTitleArt(film: Film, fontFamily: string, align: TitleAlign, maxPoints = 6000): TitleArt {
   const { width: W, height: H } = TITLE_CANVAS;
   const canvas = document.createElement('canvas');
   canvas.width = W;
@@ -53,12 +53,12 @@ export function drawTitleArt(film: Film, ordinal: number, total: number, fontFam
   ctx.textAlign = align;
   ctx.textBaseline = 'alphabetic';
 
-  ctx.fillStyle = 'rgba(255,255,255,0.62)';
-  ctx.font = `600 30px ${fontFamily}`;
-  ctx.letterSpacing = '5px';
-  ctx.fillText(`${String(ordinal).padStart(2, '0')} / ${total}    ${film.year}`, x, 54);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = `620 29px ${fontFamily}`;
+  ctx.letterSpacing = '6px';
+  ctx.fillText(film.genres.slice(0, 3).join('   ').toUpperCase(), x, 54);
 
-  let size = 164;
+  let size = 196;
   let lines: string[] = [];
   for (; size >= 64; size -= 6) {
     ctx.font = `720 ${size}px ${fontFamily}`;
@@ -76,13 +76,9 @@ export function drawTitleArt(film: Film, ordinal: number, total: number, fontFam
   y += 44 - size * 0.93 + 40;
   ctx.letterSpacing = '0px';
   ctx.font = `560 36px ${fontFamily}`;
-  ctx.fillStyle = 'rgba(255,255,255,0.86)';
-  ctx.fillText(film.director, x, y);
-  y += 46;
-  ctx.font = `480 32px ${fontFamily}`;
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.fillText(`${film.minutes} min    ${film.genres.slice(0, 2).join('  ·  ')}`, x, y);
-  y += 62;
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  ctx.fillText(`${film.director}    ${film.minutes} min`, x, y);
+  y += 60;
   ctx.font = `440 33px ${fontFamily}`;
   ctx.fillStyle = 'rgba(255,255,255,0.74)';
   for (const line of wrap(ctx, film.logline, Math.min(maxWidth, 1040)).slice(0, 3)) {

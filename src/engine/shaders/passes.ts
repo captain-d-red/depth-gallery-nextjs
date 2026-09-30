@@ -48,52 +48,114 @@ void main() {
 
 /**
  * A poster is a backlit lightbox. It streams from a low resolution atlas cell to the full
- * image, dissolves into its own light as the camera passes through it, and sits inside the
- * same haze as everything else, so distant posters sink into the air.
+ * image and sits inside the same haze as everything else, so deeper posters sink into the
+ * dark. As the camera walks through it, the release front hands each fragment over to its
+ * particle, and the poster breaks into dust.
  */
 export const posterFragment = glsl`${header}
 ${noise}
 ${haze}
+${release}
 uniform vec3 cameraPosition;
 uniform sampler2D uAtlas;
 uniform vec4 uAtlasRect;
 uniform sampler2D uMap;
 uniform float uMapMix;
-uniform float uVisible;
+uniform float uFar;
+uniform float uRelease;
+uniform float uDirection;
 uniform float uGlow;
 uniform float uHover;
 uniform float uSeed;
-uniform vec3 uEdge;
 in vec2 vUv;
 in vec3 vWorld;
 out vec4 fragColor;
 
 void main() {
+  if (uRelease > 0.0 && releaseAmount(vUv, uSeed, uDirection, uRelease) > 0.0) discard;
   vec3 lo = texture(uAtlas, uAtlasRect.xy + vUv * uAtlasRect.zw).rgb;
   vec3 hi = texture(uMap, vUv).rgb;
-  vec3 base = mix(lo, hi, uMapMix);
+  vec3 col = mix(lo, hi, uMapMix) * uGlow * (1.0 + 0.12 * uHover);
 
-  // Dissolve. Noise is stretched along the poster so it tears like burning film stock.
-  float n = fbm2(vUv * vec2(3.2, 5.4) + uSeed * 17.0);
-  float threshold = 1.02 - uVisible * 1.1;
-  float k = n - threshold;
-  if (k < 0.0) discard;
-  float burning = clamp((1.0 - uVisible) * 5.0, 0.0, 1.0);
-  float edge = (1.0 - smoothstep(0.0, 0.06, k)) * burning;
-
-  vec3 col = base * uGlow * (1.0 + 0.12 * uHover);
   // A hairline where the light leaks around the frame.
   vec2 e = min(vUv, 1.0 - vUv) * vec2(1.0, 1.5);
   float rim = 1.0 - smoothstep(0.0, 0.008, min(e.x, e.y));
   col += rim * 0.1 * uGlow;
-  col += edge * uEdge * 5.0;
 
   vec3 toFrag = vWorld - cameraPosition;
   float dist = length(toFrag);
   vec3 rd = toFrag / dist;
-  float transmittance = exp(-uExtinction * dist);
-  col = col * transmittance + inscatter(cameraPosition, rd, dist, hazeNoise(cameraPosition, rd));
+  col = col * depthFog(dist) * uFar + inscatter(cameraPosition, rd, dist, hazeNoise(cameraPosition, rd));
   fragColor = vec4(col, 1.0);
+}
+`;
+
+/**
+ * The poster's own dust. One particle per cell of a grid over the poster, coloured from the
+ * same image, so the frame stays whole until the release front reaches a cell. Released
+ * particles part around the camera path and drift, the way smoke parts for someone walking
+ * through it, and they glow a little as they go.
+ */
+export const posterDustVertex = glsl`${header}
+${noise}
+${release}
+uniform mat4 modelMatrix;
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+uniform vec3 cameraPosition;
+uniform sampler2D uAtlas;
+uniform vec4 uAtlasRect;
+uniform sampler2D uMap;
+uniform float uMapMix;
+uniform vec2 uPlane;
+uniform vec2 uGrid;
+uniform float uRelease;
+uniform float uDirection;
+uniform float uSeed;
+in vec3 position;
+in vec3 aCell;
+out vec3 vColor;
+out vec2 vLocal;
+out float vAlpha;
+
+void main() {
+  vec2 uv = aCell.xy;
+  float r = releaseAmount(uv, uSeed, uDirection, uRelease);
+  vec3 color = mix(
+    textureLod(uAtlas, uAtlasRect.xy + uv * uAtlasRect.zw, 0.0).rgb,
+    textureLod(uMap, uv, 2.0).rgb,
+    uMapMix
+  );
+
+  vec4 world = modelMatrix * vec4((uv.x - 0.5) * uPlane.x, (uv.y - 0.5) * uPlane.y, 0.0, 1.0);
+  vec3 q = vec3(uv * vec2(5.0, 7.5), aCell.z * 7.0 + uSeed * 3.0);
+  vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 23.4), valueNoise3(q + 51.9)) - 0.5;
+  vec2 away = world.xy - cameraPosition.xy;
+  away = normalize(away + vec2(1e-4)) * (0.35 + 0.65 * smoothstep(0.0, 0.9, length(away)));
+  float travel = 1.0 - exp(-r * 2.2);
+  world.xyz += vec3(away * 0.9 + swirl.xy * 1.1, 0.35 + swirl.z * 0.9) * travel;
+  world.y += r * r * 0.18;
+
+  vec4 view = viewMatrix * world;
+  float cell = uPlane.x / uGrid.x;
+  view.xy += position.xy * cell * (0.62 + r * 0.9);
+  gl_Position = projectionMatrix * view;
+
+  vColor = color * (1.0 + r * 1.6);
+  vLocal = position.xy;
+  vAlpha = r > 0.0 && r < 1.0 ? pow(1.0 - r, 1.3) * smoothstep(0.0, 0.05, r) * smoothstep(0.05, 0.5, -view.z) : 0.0;
+}
+`;
+
+export const posterDustFragment = glsl`${header}
+in vec3 vColor;
+in vec2 vLocal;
+in float vAlpha;
+out vec4 fragColor;
+void main() {
+  if (vAlpha <= 0.0) discard;
+  float a = exp(-dot(vLocal, vLocal) * 2.2) * vAlpha;
+  fragColor = vec4(vColor * a, 1.0);
 }
 `;
 
