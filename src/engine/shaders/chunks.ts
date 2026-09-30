@@ -161,12 +161,17 @@ vec3 inscatter(vec3 ro, vec3 rd, float tMax, vec2 density) {
  * at particle scale, so the edge crumbles grain by grain instead of cutting a clean line.
  */
 export const release = glsl`
-float releaseAmount(vec2 uv, float seed, float direction, float progress) {
+float releaseFront(vec2 uv, float seed, float direction, float progress) {
   float sweep = direction > 0.0 ? uv.x : 1.0 - uv.x;
   float threshold = 0.56 * sweep
     + 0.32 * valueNoise2(uv * vec2(13.0, 6.5) + seed * 13.7)
     + 0.12 * valueNoise2(uv * vec2(70.0, 105.0) + seed * 5.1);
-  return clamp((progress * 1.42 - threshold) / 0.42, 0.0, 1.0);
+  return (progress * 1.42 - threshold) / 0.42;
+}
+
+/** Zero before the front arrives, rising to one as the grain finishes its flight. */
+float releaseAmount(vec2 uv, float seed, float direction, float progress) {
+  return clamp(releaseFront(uv, seed, direction, progress), 0.0, 1.0);
 }
 `;
 
@@ -175,8 +180,9 @@ float releaseAmount(vec2 uv, float seed, float direction, float progress) {
  * focal plane, measured as a ratio, so a poster twice the focus distance away is blurred half
  * as much as one at infinity. `uAperture` is that infinite-distance radius in device pixels.
  *
- *   coc(d) = aperture * | 1 - focus / d |
+ *   coc(d) = aperture * max(| 1 - focus / d | - zone, 0)
  *
+ * The zone is the depth of field, so a title set a little behind its poster stays as sharp.
  * `uPxToView` converts a pixel radius to a view-space size at unit depth, which lets sprites
  * grow into bokeh discs of the right size.
  */
@@ -185,8 +191,12 @@ uniform float uFocus;
 uniform float uAperture;
 uniform float uPxToView;
 
+/** Depth that still reads as sharp, as a share of the focus distance on either side. */
+const float FOCUS_ZONE = 0.07;
+
 float circleOfConfusion(float depth) {
-  return min(uAperture * abs(1.0 - uFocus / max(depth, 1e-3)), uAperture * 1.8);
+  float miss = max(abs(1.0 - uFocus / max(depth, 1e-3)) - FOCUS_ZONE, 0.0);
+  return min(uAperture * miss, uAperture * 1.8);
 }
 `;
 

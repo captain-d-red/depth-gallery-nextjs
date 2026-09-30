@@ -23,13 +23,7 @@ import {
   oklchToOklab,
   srgbToLinear,
 } from '../src/lib/color.ts';
-import {
-  NEUTRAL_CHROMA,
-  type VividPalette,
-  familyMembership,
-  vividPalette,
-  vividWeight,
-} from '../src/lib/palette.ts';
+import { NEUTRAL_CHROMA, type VividPalette, familyMembership, vividPalette, vividWeight } from '../src/lib/palette.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argSrc = process.argv.indexOf('--src');

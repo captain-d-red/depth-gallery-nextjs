@@ -24,7 +24,7 @@ import { Floor } from './Floor';
 import { createFullscreenGeometry, createHdrTarget, createScreenPass } from './gl';
 import { FOCUS, cameraZForPosition, dwell } from './layout';
 import { MAX_LIGHTS } from './shaders/chunks';
-import { backdropFragment, hazeFragment, postFragment } from './shaders/passes';
+import { backdropFragment, bloomExtractFragment, blurFragment, hazeFragment, postFragment } from './shaders/passes';
 
 export interface EngineOptions {
   readonly canvas: HTMLCanvasElement;
@@ -72,6 +72,10 @@ export class Engine {
   private readonly hazeTarget: WebGLRenderTarget;
   private readonly mirrorTarget: WebGLRenderTarget;
   private readonly sceneTarget: WebGLRenderTarget;
+  private readonly bloomTargets: readonly [WebGLRenderTarget, WebGLRenderTarget];
+  private readonly bloomScenes: { extract: Scene; blurX: Scene; blurY: Scene };
+  private readonly blurX: Record<string, IUniform>;
+  private readonly blurY: Record<string, IUniform>;
   private readonly screenGeometry: BufferGeometry;
   private readonly films: Films;
   private readonly floor: Floor;
@@ -118,16 +122,30 @@ export class Engine {
     this.hazeTarget = createHdrTarget(0, false);
     this.mirrorTarget = createHdrTarget(0, false);
     this.sceneTarget = createHdrTarget(4, false);
+    this.bloomTargets = [createHdrTarget(0, false), createHdrTarget(0, false)];
     this.screenGeometry = createFullscreenGeometry();
+
+    // Halation runs at quarter resolution: extract the highlights, then blur them twice.
+    this.blurX = { uSource: { value: this.bloomTargets[0].texture }, uStep: { value: new Vector2() } };
+    this.blurY = { uSource: { value: this.bloomTargets[1].texture }, uStep: { value: new Vector2() } };
+    this.bloomScenes = { extract: new Scene(), blurX: new Scene(), blurY: new Scene() };
+    this.bloomScenes.extract.add(
+      createScreenPass(this.screenGeometry, bloomExtractFragment, {
+        uSource: { value: this.sceneTarget.texture },
+        uKnee: { value: 0.72 },
+      }),
+    );
+    this.bloomScenes.blurX.add(createScreenPass(this.screenGeometry, blurFragment, this.blurX));
+    this.bloomScenes.blurY.add(createScreenPass(this.screenGeometry, blurFragment, this.blurY));
 
     this.haze = {
       uLightPos: { value: new Float32Array(MAX_LIGHTS * 4) },
       uLightCol: { value: new Float32Array(MAX_LIGHTS * 4) },
       uLightCount: { value: 0 },
-      uScatter: { value: 0.032 },
+      uScatter: { value: 0.034 },
       uExtinction: { value: 0.03 },
       uSoft: { value: 0.05 },
-      uFalloff: { value: 0.8 },
+      uFalloff: { value: 1.3 },
       uDepthFog: { value: 0.42 },
       uTime: { value: 0 },
     };
@@ -165,6 +183,8 @@ export class Engine {
 
     this.postPass = {
       uScene: { value: this.sceneTarget.texture },
+      uBloom: { value: this.bloomTargets[0].texture },
+      uHalation: { value: 0.32 },
       uResolution: { value: new Vector2(1, 1) },
       uVanish: { value: new Vector2(0.5, 0.5) },
       uSmear: { value: 0 },
@@ -214,6 +234,11 @@ export class Engine {
     this.sceneTarget.setSize(w, h);
     this.hazeTarget.setSize(Math.ceil(w / 2), Math.ceil(h / 2));
     this.mirrorTarget.setSize(Math.ceil(w / 2), Math.ceil(h / 2));
+    const bw = Math.ceil(w / 4);
+    const bh = Math.ceil(h / 4);
+    for (const target of this.bloomTargets) target.setSize(bw, bh);
+    (this.blurX.uStep!.value as Vector2).set(1.6 / bw, 0);
+    (this.blurY.uStep!.value as Vector2).set(0, 1.6 / bh);
     (this.postPass.uResolution!.value as Vector2).set(w, h);
 
     const aspect = this.width / this.height;
@@ -300,6 +325,13 @@ export class Engine {
     r.render(this.mainScene, this.mirrorCamera);
     r.setRenderTarget(this.sceneTarget);
     r.render(this.mainScene, this.camera);
+    const [bloomA, bloomB] = this.bloomTargets;
+    r.setRenderTarget(bloomA);
+    r.render(this.bloomScenes.extract, this.screenCamera);
+    r.setRenderTarget(bloomB);
+    r.render(this.bloomScenes.blurX, this.screenCamera);
+    r.setRenderTarget(bloomA);
+    r.render(this.bloomScenes.blurY, this.screenCamera);
     r.setRenderTarget(null);
     r.render(this.postScene, this.screenCamera);
 
@@ -388,8 +420,10 @@ export class Engine {
     this.hazeTarget.dispose();
     this.mirrorTarget.dispose();
     this.sceneTarget.dispose();
+    for (const target of this.bloomTargets) target.dispose();
     this.screenGeometry.dispose();
-    for (const scene of [this.hazeScene, this.postScene]) {
+    const { extract, blurX, blurY } = this.bloomScenes;
+    for (const scene of [this.hazeScene, this.mainScene, this.postScene, extract, blurX, blurY]) {
       scene.traverse((o) => {
         const material = (o as { material?: { dispose(): void } }).material;
         material?.dispose();

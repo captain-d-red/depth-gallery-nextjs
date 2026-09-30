@@ -112,7 +112,11 @@ void main() {
   float rimWidth = max(0.85, coc * 0.8);
   float rim = exp(-pow((inside + 0.9) / rimWidth, 2.0)) / (1.0 + coc * 0.22);
   if (coverage < 0.002 && rim < 0.004) discard;
-  if (uRelease > 0.0 && releaseAmount(cuv, uSeed, uDirection, uRelease) > 0.0) discard;
+  // Just ahead of the release front the print smoulders in its key colour, so the image
+  // turns to ash along a glowing seam instead of a hard cut.
+  float front = uRelease > 0.0 ? releaseFront(cuv, uSeed, uDirection, uRelease) : -1.0;
+  if (front > 0.0) discard;
+  float seam = smoothstep(-0.09, 0.0, front);
 
   vec3 col;
   if (coc < 0.9) {
@@ -127,14 +131,17 @@ void main() {
 
   // Clear coat. A broad soft sheen and a tighter core, stretched like a studio softbox.
   vec2 d = (cuv - uSheen) * vec2(1.0, 0.58);
-  float spec = exp(-dot(d, d) * 7.0) * 0.1 + exp(-dot(d, d) * 70.0) * 0.07;
+  float spec = exp(-dot(d, d) * 6.0) * 0.16 + exp(-dot(d, d) * 55.0) * 0.14;
   col += spec * uHover * vec3(1.0, 0.98, 0.95);
+
+  col = mix(col, uKey * 2.4 + 0.25, seam * seam) + uKey * seam * 0.8;
 
   float along = clamp(0.5 + (puv.x - puv.y) * 0.5, 0.0, 1.0);
   vec3 rimColour = mix(uKey, uAccent, along) * 1.35;
 
   float fog = depthFog(dist) * uFar;
-  vec3 air = inscatter(cameraPosition, rd, dist, hazeNoise(cameraPosition, rd));
+  // The print's own glow is left out of the air in front of it, or it would veil its face.
+  vec3 air = inscatter(cameraPosition, rd, max(dist - 0.5, 0.0), hazeNoise(cameraPosition, rd));
   vec3 lit = col * fog * coverage + rimColour * rim * fog * 0.9 + air * coverage;
   fragColor = vec4(lit, coverage);
 }
@@ -165,10 +172,13 @@ void main() {
   float coc = circleOfConfusion(dist);
   float lod = log2(max(coc * uMapSize.y * fwidth(vUv.y) * 0.6, 1.0));
   float coverage = textureLod(uMap, vUv, lod).r;
-  if (coverage < 0.004) discard;
+  // A soft dark halo, read from a far mip, keeps the type legible over whatever glows behind it.
+  float halo = textureLod(uMap, vUv, lod + 4.0).r;
+  if (coverage < 0.004 && halo < 0.01) discard;
   if (releaseAmount(vUv, uSeed, uDirection, uProgress) > 0.0) discard;
   float a = coverage * uOpacity;
-  fragColor = vec4(uInk * exp(-uExtinction * dist) * a, a);
+  float shade = min(halo * 1.6, 1.0) * 0.5 * uOpacity;
+  fragColor = vec4(uInk * exp(-uExtinction * dist) * a, max(a, shade));
 }
 `;
 
@@ -258,25 +268,26 @@ void main() {
   vec4 world = modelMatrix * vec4((uv.x - 0.5) * uPlane.x, (uv.y - 0.5) * uPlane.y, 0.0, 1.0);
   vec3 q = vec3(uv * vec2(4.0, 6.0), aCell.z * 5.0 + uSeed * 3.0 + uTime * 0.05);
   vec3 swirl = vec3(valueNoise3(q), valueNoise3(q + 23.4), valueNoise3(q + 51.9)) - 0.5;
-  world.xyz = wakeOffset(world.xyz, cameraPosition, r, swirl, aCell.z, uDirection, 1.0);
+  // Grains peel away slowly, then the wake takes them.
+  world.xyz = wakeOffset(world.xyz, cameraPosition, pow(r, 1.45), swirl, aCell.z, uDirection, 1.0);
 
   vec4 view = viewMatrix * world;
   float depth = max(-view.z, 0.05);
-  float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.9 - r * 0.35);
+  float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.62 - r * 0.3);
   float coc = circleOfConfusion(depth);
   float radiusPx = max(grainPx, coc);
   view.xy += position.xy * radiusPx * uPxToView * depth;
   gl_Position = projectionMatrix * view;
 
-  // A grain flares as it leaves the surface, catching the film's key light, then cools.
-  float flare = r * (1.0 - r) * 4.0;
-  vec3 colour = mix(image, uKey * 1.4, 0.3 * flare) * (1.0 + 0.9 * flare);
-  float glint = step(0.965, aCell.z) * pow(max(sin(uTime * 6.0 + aCell.z * 91.0), 0.0), 24.0) * 5.0;
-  float energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.05, 1.0);
-  vColor = colour * (1.0 + glint) * energy;
-  vBokeh = smoothstep(1.6, 4.0, coc / max(grainPx, 0.5));
-  float nearFade = smoothstep(0.3, 1.1, depth);
-  vAlpha = pow(1.0 - r, 1.6) * smoothstep(0.0, 0.05, r) * nearFade;
+  // A grain leaves the seam still glowing in the key colour, then cools into ash.
+  float ember = 1.0 - smoothstep(0.0, 0.22, r);
+  vec3 colour = image * (1.0 - 0.45 * r) + uKey * ember * 1.6;
+  float glint = step(0.975, aCell.z) * pow(max(sin(uTime * 5.0 + aCell.z * 91.0), 0.0), 24.0) * 3.0;
+  float energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.02, 1.0);
+  vColor = colour * (1.0 + glint);
+  vBokeh = smoothstep(2.0, 5.0, coc / max(grainPx, 0.5));
+  float nearFade = smoothstep(0.35, 1.2, depth);
+  vAlpha = pow(1.0 - r, 1.8) * smoothstep(0.0, 0.04, r) * nearFade * energy;
 }
 `;
 
@@ -291,7 +302,7 @@ void main() {
   if (vAlpha <= 0.0) discard;
   float a = spriteShape(vLocal, vBokeh) * vAlpha;
   if (a < 0.002) discard;
-  fragColor = vec4(vColor * a, 1.0);
+  fragColor = vec4(vColor * a, a);
 }
 `;
 
@@ -384,6 +395,8 @@ void main() {
  * - A Schlick Fresnel term makes the floor mirror-like at grazing angles and matte underfoot.
  * - Each poster light casts a Lambertian pool of its colour onto the floor in front of it.
  * - Slow low-frequency noise varies the roughness, so the sheen is never uniform plastic.
+ *
+ * Output is premultiplied, because the far floor fades into the haze behind it.
  */
 export const floorFragment = glsl`${header}
 ${noise}
@@ -428,18 +441,58 @@ void main() {
 
   vec3 col = irradiance * uAlbedo + reflection * fresnel * uReflect;
   col = col * depthFog(dist) + inscatter(cameraPosition, rd, dist, hazeNoise(cameraPosition, rd));
-  fragColor = vec4(col, 1.0);
+  // Far away the floor gives way to the haze behind it, so the horizon dissolves into the air
+  // instead of cutting a line across the frame.
+  float solid = 1.0 - smoothstep(5.0, 17.0, dist);
+  fragColor = vec4(col * solid, solid);
+}
+`;
+
+/**
+ * Halation, first step. Keeps only what is brighter than the knee, with a soft shoulder so
+ * the glow grows smoothly out of the highlights instead of switching on at a threshold.
+ */
+export const bloomExtractFragment = glsl`${header}
+uniform sampler2D uSource;
+uniform float uKnee;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec3 c = texture(uSource, vUv).rgb;
+  float peak = max(max(c.r, c.g), c.b);
+  float soft = clamp(peak - uKnee + 0.25, 0.0, 0.5);
+  float weight = max(soft * soft / 0.5, peak - uKnee) / max(peak, 1e-4);
+  fragColor = vec4(c * weight, 1.0);
+}
+`;
+
+/** A separable gaussian over nine taps with linear-sampling offsets, one axis per pass. */
+export const blurFragment = glsl`${header}
+uniform sampler2D uSource;
+uniform vec2 uStep;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec3 c = texture(uSource, vUv).rgb * 0.2270270270;
+  c += texture(uSource, vUv + uStep * 1.3846153846).rgb * 0.3162162162;
+  c += texture(uSource, vUv - uStep * 1.3846153846).rgb * 0.3162162162;
+  c += texture(uSource, vUv + uStep * 3.2307692308).rgb * 0.0702702703;
+  c += texture(uSource, vUv - uStep * 3.2307692308).rgb * 0.0702702703;
+  fragColor = vec4(c, 1.0);
 }
 `;
 
 /**
  * Final pass. Fast travel smears the frame toward the vanishing point with a slight split
- * of the three primaries, then highlights roll off, a fine grain is laid in and the image is
- * dithered and encoded for the display.
+ * of the three primaries. Halation is laid back over the highlights with the warm fringe of
+ * film stock, then highlights roll off, a fine grain is laid in and the image is dithered
+ * and encoded for the display.
  */
 export const postFragment = glsl`${header}
 ${noise}
 uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform float uHalation;
 uniform vec2 uResolution;
 uniform vec2 uVanish;
 uniform float uSmear;
@@ -486,6 +539,8 @@ void main() {
     col = texture(uScene, vUv).rgb;
   }
 
+  vec3 glow = texture(uBloom, vUv).rgb;
+  col += glow * uHalation * vec3(1.0, 0.72, 0.55);
   col *= uExposure;
   float vignette = 1.0 - 0.34 * smoothstep(0.35, 1.05, length(toCentre * vec2(uResolution.x / uResolution.y, 1.0)));
   col *= vignette;

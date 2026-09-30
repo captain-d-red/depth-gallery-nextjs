@@ -2,7 +2,7 @@
  * Renders the site in the installed Chrome with a real GPU and real input, and saves one
  * screenshot per viewport and scroll stop into tools/shots.
  *
- *   node tools/capture.mjs [url] [--stops 0,1,2.5] [--sizes laptop,fhd]
+ *   node tools/capture.mjs [url] [--stops 0,1,2.5] [--sizes laptop,fhd] [--hover 0.6,0.45]
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -27,6 +27,8 @@ const url = args.find((a) => a.startsWith('http')) ?? 'http://localhost:3100';
 const stops = flag('stops', '0,0.5,1,3').split(',').map(Number);
 const sizes = flag('sizes', 'laptop').split(',');
 const settle = Number(flag('settle', '1800'));
+/** Optional pointer position, as fractions of the viewport, for a hover capture at each stop. */
+const hover = flag('hover', '') ? flag('hover', '').split(',').map(Number) : null;
 /** Matches the wheel multiplier the page gives its smooth scroller. */
 const WHEEL_SCALE = 0.85;
 const outDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'shots');
@@ -72,6 +74,12 @@ for (const name of sizes) {
     const file = path.join(outDir, `${name}-${String(stop).replace('.', '_')}.png`);
     await page.screenshot({ path: file });
     console.log(file);
+    if (hover) {
+      await page.mouse.move(width * hover[0], height * hover[1], { steps: 12 });
+      await page.waitForTimeout(900);
+      await page.screenshot({ path: file.replace('.png', '-hover.png') });
+      await page.mouse.move(width * 0.52, height * 0.46, { steps: 6 });
+    }
   }
   const fps = await page.evaluate(
     () =>

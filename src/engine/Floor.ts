@@ -1,4 +1,14 @@
-import { GLSL3, Mesh, PlaneGeometry, RawShaderMaterial, type IUniform, type Texture } from 'three';
+import {
+  CustomBlending,
+  GLSL3,
+  Mesh,
+  OneFactor,
+  OneMinusSrcAlphaFactor,
+  PlaneGeometry,
+  RawShaderMaterial,
+  type IUniform,
+  type Texture,
+} from 'three';
 import type { HazeUniforms } from './Films';
 import { floorFragment, floorVertex } from './shaders/passes';
 
@@ -28,7 +38,8 @@ export class Floor {
       uReflect: { value: 0.95 },
       uAlbedo: { value: 0.1 },
     };
-    const geometry = new PlaneGeometry(48, DEPTH);
+    // Wide enough that its side edges never reach the frame, even at the far fog line.
+    const geometry = new PlaneGeometry(400, DEPTH);
     geometry.rotateX(-Math.PI / 2);
     this.mesh = new Mesh(
       geometry,
@@ -37,8 +48,12 @@ export class Floor {
         vertexShader: floorVertex,
         fragmentShader: floorFragment,
         uniforms: this.uniforms,
+        transparent: true,
         depthTest: false,
         depthWrite: false,
+        blending: CustomBlending,
+        blendSrc: OneFactor,
+        blendDst: OneMinusSrcAlphaFactor,
       }),
     );
     this.mesh.frustumCulled = false;

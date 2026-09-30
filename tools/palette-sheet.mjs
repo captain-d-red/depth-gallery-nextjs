@@ -16,7 +16,9 @@ const STRIP = 26;
 const rows = Math.ceil(films.length / COLS);
 const tiles = await Promise.all(
   films.map(async (film, i) => {
-    const poster = await sharp(path.join(root, 'public', film.image.src)).resize(W, H, { fit: 'cover' }).toBuffer();
+    const poster = await sharp(path.join(root, 'public', film.image.src))
+      .resize(W, H, { fit: 'cover' })
+      .toBuffer();
     const swatch = Buffer.from(
       `<svg width="${W}" height="${STRIP}"><rect width="${W / 2}" height="${STRIP}" fill="${film.palette.key}"/><rect x="${W / 2}" width="${W / 2}" height="${STRIP}" fill="${film.palette.accent}"/></svg>`,
     );

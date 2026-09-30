@@ -120,8 +120,8 @@ const MAX_LOADS = 4;
 
 /** World padding round each print, room for a defocused edge to spread. */
 const PAD = 0.1;
-/** Grains laid over a poster, roughly one per eleven world millimetres. */
-const DUST_GRID = { columns: 88, rows: 132 } as const;
+/** Grains laid over a poster, roughly one per eight world millimetres. */
+const DUST_GRID = { columns: 120, rows: 180 } as const;
 /** Two posters at most are ever breaking up at once, so two particle systems are pooled. */
 const DUST_POOL = 2;
 /** Draw order steps per film. Deeper films draw first, so the scene paints back to front. */
@@ -309,7 +309,10 @@ export class Films {
     node.hover = damp(node.hover, hit ? 1 : 0, 9, frame.dt);
     if (hit) {
       node.tilt.set(damp(node.tilt.x, hit.u - 0.5, 8, frame.dt), damp(node.tilt.y, hit.v - 0.5, 8, frame.dt));
-      node.sheen.set(damp(node.sheen.x, 0.2 + (1 - hit.u) * 0.6, 7, frame.dt), damp(node.sheen.y, 0.25 + (1 - hit.v) * 0.6, 7, frame.dt));
+      node.sheen.set(
+        damp(node.sheen.x, 0.2 + (1 - hit.u) * 0.6, 7, frame.dt),
+        damp(node.sheen.y, 0.25 + (1 - hit.v) * 0.6, 7, frame.dt),
+      );
     } else {
       node.tilt.set(damp(node.tilt.x, 0, 5, frame.dt), damp(node.tilt.y, 0, 5, frame.dt));
     }
@@ -508,10 +511,8 @@ export class Films {
             uTime: { value: 0 },
             uKey: { value: [1, 1, 1] },
           },
-          transparent: true,
-          depthTest: false,
-          depthWrite: false,
-          blending: AdditiveBlending,
+          // Ash is laid over the scene rather than added to it, so dense drifts never blow out.
+          ...premultiplied,
         }),
       );
       mesh.frustumCulled = false;
