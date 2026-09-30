@@ -39,3 +39,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# test and capture output
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/tools/shots/
+
+# local tooling
+.claude/worktrees/
+__pycache__/
