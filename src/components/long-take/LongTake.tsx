@@ -47,9 +47,11 @@ export function LongTake() {
       });
     };
 
+    // The pointer is measured against the canvas, which need not fill the window.
     const onPointerMove = (e: PointerEvent) => {
-      pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-      pointer.y = 1 - (e.clientY / window.innerHeight) * 2;
+      const box = canvas.getBoundingClientRect();
+      pointer.x = ((e.clientX - box.left) / box.width) * 2 - 1;
+      pointer.y = 1 - ((e.clientY - box.top) / box.height) * 2;
       pointer.active = e.pointerType === 'mouse' || e.pointerType === 'pen';
     };
     const onPointerLeave = () => {
@@ -138,8 +140,10 @@ export function LongTake() {
 
   return (
     <div className={styles.root} data-status={status}>
-      <canvas ref={canvasRef} className={styles.canvas} aria-hidden="true" />
-      <Hud ref={hudRef} film={film} index={index} onJump={(i) => jumpRef.current(i)} />
+      <div className={styles.stage}>
+        <canvas ref={canvasRef} className={styles.canvas} aria-hidden="true" />
+        <Hud ref={hudRef} film={film} index={index} onJump={(i) => jumpRef.current(i)} />
+      </div>
       {status === 'unsupported' && (
         <p className={styles.unsupported} role="status">
           This take needs WebGL 2, which this browser has turned off. The full list of films is below.

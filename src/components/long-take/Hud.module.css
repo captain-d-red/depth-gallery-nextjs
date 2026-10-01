@@ -5,7 +5,7 @@
  */
 .hud {
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
@@ -210,8 +210,8 @@
   --crest: 2.8;
   --sharpness: 0.035;
   position: absolute;
-  top: 22vh;
-  bottom: 24vh;
+  top: 22%;
+  bottom: 24%;
   right: calc(var(--gutter) + 0.9em);
   width: 8.2em;
   pointer-events: auto;
@@ -551,8 +551,8 @@
   }
   .rail {
     --crest: 1.8;
-    top: 18vh;
-    bottom: 30vh;
+    top: 18%;
+    bottom: 30%;
     width: 3em;
     right: calc(var(--gutter) + 0.3em);
   }

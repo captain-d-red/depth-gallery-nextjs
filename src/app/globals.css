@@ -19,7 +19,9 @@
 /* One fluid root, so the interface keeps its proportions from a phone up to a 4K screen. */
 html {
   font-size: clamp(14px, calc(min(0.36vw, 0.64vh) + 9px), 26px);
-  background: var(--ink);
+  background: #000;
+  /* The page scrolls by wheel and touch, and a scrollbar would sit inside the recording. */
+  scrollbar-width: none;
   color: var(--paper);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -28,7 +30,7 @@ html {
 
 body {
   margin: 0;
-  background: var(--ink);
+  background: #000;
   overscroll-behavior: none;
 }
 
