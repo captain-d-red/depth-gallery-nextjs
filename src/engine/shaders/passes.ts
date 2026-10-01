@@ -200,9 +200,11 @@ void main() {
 /**
  * Motion shared by every particle, poster or title. Nothing ever moves toward the lens.
  *
- * 1. A side wind carries each particle out toward the side of the frame its surface hangs on,
- *    on a rising diagonal fanned a little per particle, so a print on the right streams off to
- *    the right and a print on the left streams off to the left.
+ * 1. A side wind carries each particle out toward the side of the frame its surface hangs on.
+ *    Its diagonal is set by where the particle sat on the surface: the top rises steeply, the
+ *    middle leaves almost level and the foot dips a little, so the print fans apart sideways
+ *    from its own centre. A fan from the middle of the frame would read as the cloud rushing
+ *    at the lens, since that is how anything approaching a camera moves on screen.
  * 2. A flow field adds eddies along the way. The field comes from a stream function, the sum
  *    of three travelling waves, and its velocity is the curl of that function:
  *
@@ -211,20 +213,21 @@ void main() {
  *
  *    A curl has no divergence, so particles swirl but never bunch up or thin out, which is
  *    what makes the motion read as a fluid rather than as scattered noise.
- * 3. The camera's bow wave pushes particles outward from its axis and ahead of it, harder the
- *    closer it comes, so whatever is left parts round the lens instead of meeting it.
+ * 3. The camera's bow wave hurries the wind as the camera closes and pushes particles ahead of
+ *    it, deeper into the scene, so the cloud has left by the time the camera arrives.
  *
- *          print on the right               the wind leaves on a rising diagonal
- *        ┌───────┐   ↗  ↗                   outward, fanned about twenty degrees
- *    ·   │       │  ↗  ↗  → off frame        either side, and drifts back in depth
- *  camera└───────┘    ↗                      away from the lens as it goes
+ *          print on the right
+ *        ┌───────┐  ↗ ↗           top of the print, rising steeply
+ *    ·   │       │  → →  off frame   middle, almost level
+ *  camera└───────┘  ↘             foot, dipping a little
  *
  * Every term scales with travel, which each caller shapes over its particle's life.
  */
 const drift = glsl`
-/** Rise of the side wind above the horizontal, in radians, and the fan of angles round it. */
-const float WIND_RISE = 0.35;
-const float WIND_FAN = 0.7;
+/** Slope of the side wind at mid-height, how much it steepens toward the top of a surface, and a per-particle fan. */
+const float WIND_RISE = 0.3;
+const float WIND_SPREAD = 1.3;
+const float WIND_FAN = 0.4;
 /** How far the side wind carries a particle over its whole travel, in world units. */
 const float WIND_DISTANCE = 1.2;
 /** How far a particle drifts back in depth, away from the lens, over its travel. */
@@ -232,12 +235,19 @@ const float WIND_BACK = 0.12;
 /** How far the camera's bow wave reaches ahead of it, and where it peaks, in world units. */
 const float BOW_REACH = 1.8;
 const float BOW_PEAK = 0.4;
-/** Extra outward spread the bow wave gives, as a share of distance from the camera's axis. */
-const float BOW_SPREAD = 1.6;
-/** Fixed outward clearance the bow wave gives, in world units, so the subject is cleared too. */
-const float BOW_CLEARANCE = 0.45;
+/** Extra distance the bow wave adds to the side wind, in world units. */
+const float BOW_HURRY = 0.6;
 /** How far the bow wave pushes particles ahead, away from the lens, in world units. */
 const float BOW_AHEAD = 0.35;
+/** The middle of the frame kept clear near the lens, as a radius in clip space, and the depth it reaches. */
+const float FACE_RADIUS = 0.4;
+const float FACE_DEPTH = 0.9;
+
+/** The direction a particle leaves in, from its surface's side and its height on it. */
+vec2 sideWind(float side, float height, float seed) {
+  float rise = WIND_RISE + (height - 0.5) * WIND_SPREAD + (fract(seed * 4.13) - 0.5) * WIND_FAN;
+  return normalize(vec2(side, rise));
+}
 
 vec2 streamFlow(vec2 p, float t) {
   const vec2 k1 = vec2(1.9, 2.6);
@@ -249,18 +259,13 @@ vec2 streamFlow(vec2 p, float t) {
   return c1 * vec2(k1.y, -k1.x) + c2 * vec2(k2.y, -k2.x) + c3 * vec2(k3.y, -k3.x);
 }
 
-vec3 particlePath(vec3 rest, vec3 camera, float travel, float seed, float side, float time) {
-  float angle = WIND_RISE + (fract(seed * 4.13) - 0.5) * WIND_FAN;
+vec3 particlePath(vec3 rest, vec3 camera, float travel, float seed, vec2 wind, float time) {
   float reach = WIND_DISTANCE * (0.6 + 0.8 * fract(seed * 6.71));
+  float bowWave = smoothstep(BOW_REACH, BOW_PEAK, camera.z - rest.z);
   vec3 p = rest;
-  p.xy += vec2(side * cos(angle), sin(angle)) * reach * travel;
+  p.xy += wind * (reach + BOW_HURRY * bowWave) * travel;
   float stride = travel * 0.06;
   for (int i = 0; i < 4; i++) p.xy += streamFlow(p.xy * 1.3 + seed * 0.35, time + float(i) * 0.4) * stride;
-  // The bow wave scales a particle's distance from the axis and also adds a fixed clearance,
-  // since a scale alone could never move a particle that sits right in front of the subject.
-  float bowWave = smoothstep(BOW_REACH, BOW_PEAK, camera.z - rest.z);
-  vec2 rel = p.xy - camera.xy;
-  p.xy += rel * travel * BOW_SPREAD * bowWave + normalize(rel + 1e-4) * travel * bowWave * BOW_CLEARANCE;
   p.z -= travel * (WIND_BACK * (0.5 + seed) + BOW_AHEAD * bowWave);
   return p;
 }
@@ -274,6 +279,8 @@ struct Sprite {
   float bokeh;
   float stretch;
   float energy;
+  /** One outside the clear middle, falling to zero for a particle about to meet the lens. */
+  float face;
 };
 
 Sprite placeSprite(vec3 p, vec3 before, float grainPx, vec2 corner) {
@@ -281,6 +288,9 @@ Sprite placeSprite(vec3 p, vec3 before, float grainPx, vec2 corner) {
   vec4 view = viewMatrix * vec4(p, 1.0);
   vec4 prev = viewMatrix * vec4(before, 1.0);
   float depth = max(-view.z, 0.05);
+  vec4 clip = projectionMatrix * view;
+  float centrality = 1.0 - smoothstep(FACE_RADIUS, FACE_RADIUS + 0.35, length(clip.xy / max(clip.w, 1e-3)));
+  sp.face = 1.0 - centrality * (1.0 - smoothstep(FACE_DEPTH, FACE_DEPTH + 1.2, depth));
   float coc = circleOfConfusion(depth);
   float radiusPx = max(grainPx, coc);
   float size = radiusPx * uPxToView * depth;
@@ -368,6 +378,8 @@ const float MOTE_SHARE = 0.02;
  */
 const float GLINT_POWER = 14.0;
 const float GLINT_CLIP = 1.5;
+/** Least linear light a particle must carry to be drawn, a little under one step of eight-bit output. */
+const float MIN_VISIBLE_LIGHT = 0.006;
 
 float elapsedIn(int bin) {
   vec4 v = uElapsed[bin / 4];
@@ -419,8 +431,9 @@ void main() {
   // fine ash and motes move as one cloud and only their lives differ.
   float travel = 1.0 - pow(1.0 - min(elapsed / ${MOTE_SECONDS.toFixed(2)}, 1.0), 2.4);
   float travelBefore = 1.0 - pow(1.0 - min(max(elapsed - uDt, 0.0) / ${MOTE_SECONDS.toFixed(2)}, 1.0), 2.4);
-  vec3 p = particlePath(rest, cameraPosition, travel, seed, uDirection, t);
-  vec3 before = particlePath(rest, cameraPosition, travelBefore, seed, uDirection, t);
+  vec2 wind = sideWind(uDirection, uv.y, seed);
+  vec3 p = particlePath(rest, cameraPosition, travel, seed, wind, t);
+  vec3 before = particlePath(rest, cameraPosition, travelBefore, seed, wind, t);
   float spent = elapsed / life;
   float depth = max(-(viewMatrix * vec4(p, 1.0)).z, 0.05);
   float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.55 + 0.5 * fract(seed * 5.31)) * (1.0 - spent * 0.3);
@@ -442,7 +455,14 @@ void main() {
   // Fine ash is gone before it reaches the next film's framing distance, so it never hazes the
   // landing, while motes come closer, where they open into the large bokeh discs.
   float nearFade = smoothstep(mix(0.6, 0.2, mote), mix(1.8, 0.6, mote), depth);
-  vAlpha = appear * fade * nearFade * (1.0 - 0.5 * sp.stretch);
+  vAlpha = appear * fade * nearFade * sp.face * (1.0 - 0.5 * sp.stretch);
+  // A particle too faint to see is not drawn, as engines cull faded particles. A defocused
+  // grain of fine ash spreads so little light over so large a disc that drawing it would cost
+  // a big quad of fill for nothing visible.
+  if (vAlpha * max(max(vColor.r, vColor.g), vColor.b) < MIN_VISIBLE_LIGHT) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    vAlpha = 0.0;
+  }
 }
 `;
 
@@ -510,13 +530,14 @@ void main() {
   vec3 rest = (modelMatrix * vec4((aPoint.x - 0.5) * uPlane.x, (aPoint.y - 0.5) * uPlane.y, 0.0, 1.0)).xyz;
   float t = uTime * 0.5 + uSeed * 10.0;
   float rBefore = max(r - min(uSpeed * 0.05, 0.1), 0.0);
-  vec3 p = particlePath(rest, cameraPosition, pow(r, 1.35) * 0.75, aPoint.z, -uDirection, t);
-  vec3 before = particlePath(rest, cameraPosition, pow(rBefore, 1.35) * 0.75, aPoint.z, -uDirection, t);
+  vec2 wind = sideWind(-uDirection, aPoint.y, aPoint.z);
+  vec3 p = particlePath(rest, cameraPosition, pow(r, 1.35) * 0.75, aPoint.z, wind, t);
+  vec3 before = particlePath(rest, cameraPosition, pow(rBefore, 1.35) * 0.75, aPoint.z, wind, t);
   Sprite sp = placeSprite(p, before, uPixel * aPoint.w * (1.0 + r * 1.4), position.xy);
   gl_Position = projectionMatrix * sp.view;
   vBokeh = sp.bokeh;
   vStretch = sp.stretch;
-  vAlpha = smoothstep(-HANDOFF, 0.0, front) * pow(1.0 - r, 1.6) * sp.energy * (1.0 - 0.5 * sp.stretch);
+  vAlpha = smoothstep(-HANDOFF, 0.0, front) * pow(1.0 - r, 1.6) * sp.energy * sp.face * (1.0 - 0.5 * sp.stretch);
 }
 `;
 

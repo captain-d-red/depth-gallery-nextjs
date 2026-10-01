@@ -135,6 +135,10 @@ const DUST_GRID = { columns: 150, rows: 225 } as const;
 const DUST_POOL = 3;
 /** Draw order steps per film. Deeper films draw first, so the scene paints back to front. */
 const ORDER_STEP = 10;
+/** Camera distance from a print at which it starts to break up, just as the camera leaves it. */
+const RELEASE_START = 3.2;
+/** Camera distance by which it has gone, while it still fills only its own side of the frame. */
+const RELEASE_DONE = 1.9;
 /** Greatest lean of a print into the scroll, in radians, about six degrees. */
 const SWAY_MAX = 0.1;
 /** Lean per film per second of scroll speed, in radians, before the lean saturates. */
@@ -330,7 +334,9 @@ export class Films {
     const stack = frame.mode === 'stack';
     const zDist = frame.cameraZ - placement.z;
     const far = 1 - smoothstep(22, 30, zDist);
-    node.release = 1 - smoothstep(1.15, 3.15, zDist);
+    // The print breaks up while it still hangs on its own side of the frame, so its particles
+    // can stream off that side. Any later, it would fill the view and burst at the lens.
+    node.release = 1 - smoothstep(RELEASE_DONE, RELEASE_START, zDist);
     this.stampRelease(node, frame.time);
     node.visible = far * (1 - node.release);
     poster.visible = far > 0.001 && node.release < 0.999;
