@@ -26,14 +26,14 @@ break into dust as the camera walks through them.
 - The haze is lit by the posters, using a closed-form integral per light sample, so no ray marching is needed.
 - A poster breaks into ash as the camera passes it, handing each fragment to its own particle.
 - Titles puff away as you leave a film and re-form from dust as you arrive or scroll back.
-- The interface is a viewfinder, with a running timecode, a roll and take slate and each film's grade.
+- The interface is a viewfinder, with a running timecode, a year and film slate and a true-scale year rail.
 
 ## Run it
 
 - Install with `pnpm install`, then start the dev server with `pnpm dev`.
 - Run every gate with `pnpm check`, which covers typecheck, lint, unit tests and the production build.
 - Capture real renders with `node tools/capture.mjs --sizes laptop,fhd,imac,uhd,phone`.
-- Rebuild the poster set with `pnpm films`, which reads sources from the sibling local-scripts folder.
+- The built posters are committed in `public/films`. `pnpm films` rebuilds them from full-size sources kept outside the repository.
 
 ## Layout
 
@@ -48,6 +48,9 @@ scripts/prepare-films.ts  posters to WebP, the atlas and per-poster light sample
 tools/                    Playwright capture and preview-image scripts
 ```
 
-Poster art belongs to the studios that released the films and appears here as a
-non-commercial design study. The interface face is an Inter-derived subset under the
-SIL Open Font License.
+## License
+
+The code is released under the MIT License in `LICENSE`. Poster art belongs to the studios
+that released the films and appears here as a non-commercial design study, so it is not
+covered by that license and is not yours to reuse. The interface face is an Inter-derived
+subset under the SIL Open Font License, in `src/app/fonts/OFL.txt`.

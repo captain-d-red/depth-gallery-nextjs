@@ -56,6 +56,9 @@ const RULER = Array.from({ length: YEARS.length * DIVISIONS + 1 }, (_, k) => ({
 /** Scroll speed, in films per second, at which the rail's crest reaches its widest. */
 const FULL_SPEED = 3;
 
+/** The source of this site, open for anyone to read or fork. */
+const REPO_URL = 'https://github.com/captain-d-red/depth-gallery-nextjs';
+
 /** The streaming site's sections. This build ships the films view, so each link returns home. */
 const SECTIONS = ['Home', 'Films', 'Series', 'New and Popular', 'My List'] as const;
 
@@ -149,9 +152,10 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
             </Link>
           ))}
         </nav>
-        <Link className={styles.login} href="/">
-          Log in
-        </Link>
+        <a className={styles.repo} href={REPO_URL} target="_blank" rel="noopener noreferrer">
+          GitHub repo
+          <span aria-hidden="true">↗</span>
+        </a>
       </header>
 
       <div
