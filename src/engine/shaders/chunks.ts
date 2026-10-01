@@ -13,8 +13,14 @@ export const MAX_LIGHTS = 42;
 /** Bins over a poster's release sweep, each stamped with the moment the front passed it. */
 export const RELEASE_BINS = 64;
 
-/** Seconds the longest-lived poster particle drifts, long enough to follow by eye at any scroll speed. */
-export const FLIGHT_SECONDS = 2;
+/**
+ * Seconds a poster mote drifts before it settles. A normal flick lands on the next film in
+ * about six tenths of a second, so a mote outlives the move by well under a second.
+ */
+export const MOTE_SECONDS = 1.3;
+
+/** Seconds the fine ash lasts, long enough to read as a puff and gone before the camera lands. */
+export const FINE_SECONDS = 0.45;
 
 /** Three adds `#version 300 es` itself for materials created with `glslVersion: GLSL3`. */
 export const header = glsl`

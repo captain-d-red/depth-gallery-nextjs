@@ -28,7 +28,7 @@ import { hexToLinear, type Vec3 } from '@/lib/color';
 import { clamp, damp, lerp, smoothstep } from '@/lib/math';
 import { createQuadGeometry } from './gl';
 import { POSTER_HEIGHT, placeFilm, type Placement } from './layout';
-import { FLIGHT_SECONDS, RELEASE_BINS } from './shaders/chunks';
+import { MOTE_SECONDS, RELEASE_BINS } from './shaders/chunks';
 import {
   posterDustFragment,
   posterDustVertex,
@@ -561,7 +561,7 @@ export class Films {
       else if (Number.isNaN(freedAt[b]!)) freedAt[b] = now;
       if (passed) last = Math.max(last, freedAt[b]!);
     }
-    node.dustUntil = last + FLIGHT_SECONDS;
+    node.dustUntil = last + MOTE_SECONDS;
   }
 
   /**
@@ -570,12 +570,15 @@ export class Films {
    * gives it up once the camera is well past it.
    */
   private assignPosterDust(frame: FilmsFrame): void {
-    const breaking = this.nodes
-      .filter((n) => {
-        const inAir = n.release > 0.001 && (n.release < 0.999 || frame.time < n.dustUntil);
-        return inAir && frame.cameraZ - n.placement.z > -0.5;
-      })
-      .slice(0, DUST_POOL);
+    // With reduced motion the print dissolves in place and throws nothing into the air.
+    const breaking = frame.reducedMotion
+      ? []
+      : this.nodes
+          .filter((n) => {
+            const inAir = n.release > 0.001 && (n.release < 0.999 || frame.time < n.dustUntil);
+            return inAir && frame.cameraZ - n.placement.z > -0.5;
+          })
+          .slice(0, DUST_POOL);
     this.posterDust.forEach((mesh, i) => {
       const node = breaking[i];
       mesh.visible = node !== undefined;

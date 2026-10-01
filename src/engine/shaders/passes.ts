@@ -1,6 +1,7 @@
 import {
-  FLIGHT_SECONDS,
+  FINE_SECONDS,
   MAX_LIGHTS,
+  MOTE_SECONDS,
   RELEASE_BINS,
   fullscreenVertex,
   glsl,
@@ -231,13 +232,16 @@ vec3 particlePath(vec3 rest, vec3 camera, float travel, float seed, float direct
   float c = cos(spin);
   float s = sin(spin);
   // Air ahead of the camera is pushed outward and forward, harder the closer the camera comes.
-  float bowWave = 1.6 * smoothstep(1.8, 0.4, camera.z - rest.z);
-  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.22 + 0.3 * seed + bowWave));
+  // The push scales a particle's distance from the axis and also adds a fixed clearance, since
+  // a scale alone could never move a particle that sits right in front of the subject.
+  float bowWave = smoothstep(1.8, 0.4, camera.z - rest.z);
+  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.22 + 0.3 * seed + 1.6 * bowWave));
+  rel += normalize(rel + 1e-4) * travel * bowWave * 0.45;
   vec3 p = vec3(camera.xy + rel, rest.z);
   float stride = travel * 0.075;
   for (int i = 0; i < 4; i++) p.xy += streamFlow(p.xy * 1.3 + seed * 0.35, time + float(i) * 0.4) * stride;
   p.y += travel * travel * 0.12;
-  p.z += travel * (0.08 + 0.26 * seed - 0.22 * bowWave);
+  p.z += travel * (0.08 + 0.26 * seed - 0.35 * bowWave);
   return p;
 }
 
@@ -294,12 +298,14 @@ float spriteShape(vec2 p, float bokeh) {
  *   under it, so the handoff is invisible.
  * - The front follows the scroll, but a released particle flies on its own clock. Each part of
  *   the sweep is stamped with the moment the front passed it, and the particle's age is the
- *   time since then, so it drifts for FLIGHT_SECONDS however fast the scroll carried it free.
+ *   time since then, so it drifts at its own pace however fast the scroll carried it free.
+ * - Two populations share the cloud. Fine ash lasts under half a second and makes the puff. A
+ *   small share of motes, heavier and glossy, drifts on for about a second and makes the bokeh.
  * - It travels the shared path, the camera's wake and then the flow field, keeps the print's
  *   colour and slowly takes on the film's key as it fades, so the image dissolves into the
  *   colour of the air it lit.
- * - A share of the flakes are glossy. As one tumbles, its face turns the key light into the
- *   lens for a moment and it flashes. A flash is far brighter than the print, so when the
+ * - A mote is glossy. As one tumbles, its face turns the key light into the lens for a moment
+ *   and it flashes. A flash is far brighter than the print, so when the
  *   flake is out of focus the flash opens into a glowing bokeh disc rather than fading out.
  */
 export const posterDustVertex = glsl`${header}
@@ -333,8 +339,8 @@ out float vAlpha;
 out float vBokeh;
 out float vStretch;
 
-/** Share of flakes glossy enough to flash, all of them among the longest lived. */
-const float GLOSSY_SHARE = 0.035;
+/** Share of flakes that are motes, the glossy ones that linger and make the bokeh. */
+const float MOTE_SHARE = 0.02;
 /**
  * A flash's power against the print. It spreads over its bokeh disc like any light, so it is
  * fourteen times brighter to stay visible when defocused, and it is clipped where the sensor
@@ -370,16 +376,12 @@ void main() {
   // The sweep share at which this particle is freed, where its front crosses zero.
   float freedAt = uRelease - front * FRONT_WIDTH / (1.0 + FRONT_WIDTH);
   float elapsed = front > 0.0 ? max(elapsedSince(freedAt), 0.0) : 0.0;
-  // Lives are heavy-tailed. Most fine particles fade within a half second, and a sparse share
-  // of motes drifts for the whole flight, so the puff thins out instead of hanging as a wall.
-  float draw = fract(seed * 7.31);
-  float life = 0.22 + 0.78 * pow(draw, 9.0);
-  float age = elapsed / ${FLIGHT_SECONDS.toFixed(2)};
-  float ageBefore = max(elapsed - uDt, 0.0) / ${FLIGHT_SECONDS.toFixed(2)};
+  float mote = step(1.0 - MOTE_SHARE, fract(seed * 7.31));
+  float life = mix(${FINE_SECONDS.toFixed(2)}, ${MOTE_SECONDS.toFixed(2)}, mote) * (0.7 + 0.3 * fract(seed * 2.17));
   vLocal = position.xy;
   vBokeh = 0.0;
   vStretch = 0.0;
-  if (front <= -HANDOFF || age >= life) {
+  if (front <= -HANDOFF || elapsed >= life) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     vColor = vec3(0.0);
     vAlpha = 0.0;
@@ -393,10 +395,13 @@ void main() {
 
   vec3 rest = (modelMatrix * vec4((uv.x - 0.5) * uPlane.x, (uv.y - 0.5) * uPlane.y, 0.0, 1.0)).xyz;
   float t = uTime * 0.5;
-  // A particle bursts free and then slows into a drift, so it leaves the print at once.
-  vec3 p = particlePath(rest, cameraPosition, 1.0 - pow(1.0 - min(age, 1.0), 2.4), seed, uDirection, t);
-  vec3 before = particlePath(rest, cameraPosition, 1.0 - pow(1.0 - min(ageBefore, 1.0), 2.4), seed, uDirection, t);
-  float spent = age / life;
+  // Every particle rides one clock of motion, bursting free and then slowing into a drift, so
+  // fine ash and motes move as one cloud and only their lives differ.
+  float travel = 1.0 - pow(1.0 - min(elapsed / ${MOTE_SECONDS.toFixed(2)}, 1.0), 2.4);
+  float travelBefore = 1.0 - pow(1.0 - min(max(elapsed - uDt, 0.0) / ${MOTE_SECONDS.toFixed(2)}, 1.0), 2.4);
+  vec3 p = particlePath(rest, cameraPosition, travel, seed, uDirection, t);
+  vec3 before = particlePath(rest, cameraPosition, travelBefore, seed, uDirection, t);
+  float spent = elapsed / life;
   float depth = max(-(viewMatrix * vec4(p, 1.0)).z, 0.05);
   float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.55 + 0.5 * fract(seed * 5.31)) * (1.0 - spent * 0.3);
   Sprite sp = placeSprite(p, before, grainPx, position.xy);
@@ -405,19 +410,17 @@ void main() {
   float lift = 1.0 + 0.3 * sin(spent * 3.14159);
   vec3 colour = mix(image, uKey, smoothstep(0.2, 0.95, spent) * 0.55) * (1.0 - 0.3 * spent) * lift;
   float tumble = uTime * (1.2 + 2.4 * fract(seed * 3.77)) + seed * 40.0;
-  float glossy = step(1.0 - GLOSSY_SHARE, draw);
-  float glint = glossy * pow(max(cos(tumble), 0.0), 96.0) * smoothstep(0.02, 0.15, age);
+  float glint = mote * pow(max(cos(tumble), 0.0), 96.0) * smoothstep(0.03, 0.2, elapsed);
   float glintLight = min(glint * GLINT_POWER * sp.energy, GLINT_CLIP);
   vColor = colour * sp.energy + mix(vec3(1.0), uKey, 0.5) * glintLight;
   vBokeh = sp.bokeh;
   vStretch = sp.stretch;
   float appear = smoothstep(-HANDOFF, 0.0, front);
   // Fine ash starts thinning straight after its burst, and a mote holds until late in its drift.
-  float mote = smoothstep(0.5, 0.8, life);
   float fade = 1.0 - smoothstep(mix(0.12, 0.45, mote), 1.0, spent);
-  // Fine ash thins out as it nears the lens, as a dense cloud there would only blur into a veil.
-  // The long-lived motes come right up to the lens, where they open into large bokeh discs.
-  float nearFade = smoothstep(mix(0.35, 0.12, mote), mix(1.2, 0.45, mote), depth);
+  // Particles fade as they near the lens, as engines do to spare fill rate and avoid a veil.
+  // Motes come closer than fine ash, where they open into the large bokeh discs.
+  float nearFade = smoothstep(mix(0.35, 0.2, mote), mix(1.2, 0.6, mote), depth);
   vAlpha = appear * fade * nearFade * (1.0 - 0.5 * sp.stretch);
 }
 `;
