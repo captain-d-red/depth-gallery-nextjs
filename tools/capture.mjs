@@ -14,8 +14,16 @@ const SIZES = {
   fhd: { width: 1920, height: 1080, deviceScaleFactor: 1 },
   imac: { width: 2560, height: 1440, deviceScaleFactor: 2 },
   uhd: { width: 3840, height: 2160, deviceScaleFactor: 1 },
+  mbp14: { width: 1512, height: 982, deviceScaleFactor: 2 },
+  mbp16: { width: 1728, height: 1117, deviceScaleFactor: 2 },
+  win: { width: 1366, height: 768, deviceScaleFactor: 1 },
+  ultrawide: { width: 2560, height: 1080, deviceScaleFactor: 1 },
   tablet: { width: 1180, height: 820, deviceScaleFactor: 2 },
+  tabletPortrait: { width: 820, height: 1180, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   phone: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+  android: { width: 412, height: 915, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true },
+  phoneSmall: { width: 375, height: 667, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  phoneLandscape: { width: 844, height: 390, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
 };
 
 const args = process.argv.slice(2);

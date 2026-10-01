@@ -6,7 +6,11 @@
 .hud {
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* The dynamic viewport, so nothing hides behind a phone's toolbar while it is showing. */
+  height: 100dvh;
   z-index: 1;
   pointer-events: none;
   font-size: 0.78rem;
@@ -452,10 +456,32 @@
   animation: wheel 1.8s var(--ease) infinite;
 }
 
+.step {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+}
+
 .keys {
   display: flex;
   gap: 0.25em;
   margin-left: 0.6em;
+}
+
+/* Touch screens are told to swipe, and the wheel and the arrow keys are not mentioned. */
+.swipe {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .wheel,
+  .scroll,
+  .step {
+    display: none;
+  }
+  .swipe {
+    display: inline;
+  }
 }
 
 .keys kbd {
@@ -543,7 +569,7 @@
   .bottom {
     grid-template-columns: 1fr auto;
   }
-  .hint > span:nth-child(n + 3) {
+  .step {
     display: none;
   }
 }
@@ -564,11 +590,27 @@
     display: none;
   }
   .hint {
+    padding: 0.6em 1em;
+  }
+  .swipeMore {
     display: none;
   }
   .year,
   .take {
     font-size: 2.2em;
+  }
+}
+
+/*
+ * A phone held on its side is barely four hundred pixels tall, so the interface steps down a
+ * size and the rail labels every other year, which keeps each label clear of its neighbours.
+ */
+@media (max-height: 520px) {
+  .hud {
+    font-size: 0.68rem;
+  }
+  .years li:nth-child(even) {
+    display: none;
   }
 }
 

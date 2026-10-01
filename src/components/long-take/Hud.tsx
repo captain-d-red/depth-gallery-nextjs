@@ -218,12 +218,17 @@ export function Hud({ ref, film, index, onJump }: HudProps) {
           <span className={styles.wheel} aria-hidden="true">
             <i />
           </span>
-          <span>Scroll to travel through time</span>
-          <span className={styles.keys} aria-hidden="true">
-            <kbd>←</kbd>
-            <kbd>→</kbd>
+          <span className={styles.scroll}>Scroll to travel through time</span>
+          <span className={styles.swipe}>
+            Swipe up to travel<span className={styles.swipeMore}> through time</span>
           </span>
-          <span>to step between films</span>
+          <span className={styles.step}>
+            <span className={styles.keys} aria-hidden="true">
+              <kbd>←</kbd>
+              <kbd>→</kbd>
+            </span>
+            to step between films
+          </span>
         </p>
 
         <p className={styles.focus} aria-hidden="true">
