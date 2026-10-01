@@ -198,24 +198,37 @@ void main() {
 `;
 
 /**
- * Motion shared by every particle, poster or title.
+ * Motion shared by every particle, poster or title. Nothing ever moves toward the lens.
  *
- * 1. The camera's wake pushes a particle outward and spins it round the view axis, and the
- *    push grows as the camera closes on it, so the cloud parts round the lens.
- * 2. A flow field carries it along streamlines. The field comes from a stream function, the
- *    sum of three travelling waves, and its velocity is the curl of that function:
+ * 1. A side wind carries each particle out toward the side of the frame its surface hangs on,
+ *    on a rising diagonal fanned a little per particle, so a print on the right streams off to
+ *    the right and a print on the left streams off to the left.
+ * 2. A flow field adds eddies along the way. The field comes from a stream function, the sum
+ *    of three travelling waves, and its velocity is the curl of that function:
  *
  *        psi = sum of a * sin(k . p + w t + phase)
  *        v   = ( d psi / dy , -d psi / dx )
  *
- *    A curl has no divergence, so particles swirl and stream but never bunch up or thin out,
- *    which is what makes the motion read as a fluid rather than as scattered noise. The path
- *    is integrated in four steps, so it curves.
- * 3. It lifts a little, as warm air would, and drifts in depth.
+ *    A curl has no divergence, so particles swirl but never bunch up or thin out, which is
+ *    what makes the motion read as a fluid rather than as scattered noise.
+ * 3. The camera's bow wave pushes particles outward from its axis and ahead of it, harder the
+ *    closer it comes, so whatever is left parts round the lens instead of meeting it.
+ *
+ *          print on the right               the wind leaves on a rising diagonal
+ *        ┌───────┐   ↗  ↗                   outward, fanned about twenty degrees
+ *    ·   │       │  ↗  ↗  → off frame        either side, and drifts back in depth
+ *  camera└───────┘    ↗                      away from the lens as it goes
  *
  * Every term scales with travel, which each caller shapes over its particle's life.
  */
 const drift = glsl`
+/** Rise of the side wind above the horizontal, in radians, and the fan of angles round it. */
+const float WIND_RISE = 0.35;
+const float WIND_FAN = 0.7;
+/** How far the side wind carries a particle over its whole travel, in world units. */
+const float WIND_DISTANCE = 1.2;
+/** How far a particle drifts back in depth, away from the lens, over its travel. */
+const float WIND_BACK = 0.12;
 /** How far the camera's bow wave reaches ahead of it, and where it peaks, in world units. */
 const float BOW_REACH = 1.8;
 const float BOW_PEAK = 0.4;
@@ -236,22 +249,19 @@ vec2 streamFlow(vec2 p, float t) {
   return c1 * vec2(k1.y, -k1.x) + c2 * vec2(k2.y, -k2.x) + c3 * vec2(k3.y, -k3.x);
 }
 
-vec3 particlePath(vec3 rest, vec3 camera, float travel, float seed, float direction, float time) {
-  vec2 rel = rest.xy - camera.xy;
-  float spin = travel * 0.9 / (length(rel) + 0.5) * direction;
-  float c = cos(spin);
-  float s = sin(spin);
-  // Air ahead of the camera is pushed outward and forward, harder the closer the camera comes.
-  // The push scales a particle's distance from the axis and also adds a fixed clearance, since
-  // a scale alone could never move a particle that sits right in front of the subject.
-  float bowWave = smoothstep(BOW_REACH, BOW_PEAK, camera.z - rest.z);
-  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.22 + 0.3 * seed + BOW_SPREAD * bowWave));
-  rel += normalize(rel + 1e-4) * travel * bowWave * BOW_CLEARANCE;
-  vec3 p = vec3(camera.xy + rel, rest.z);
-  float stride = travel * 0.075;
+vec3 particlePath(vec3 rest, vec3 camera, float travel, float seed, float side, float time) {
+  float angle = WIND_RISE + (fract(seed * 4.13) - 0.5) * WIND_FAN;
+  float reach = WIND_DISTANCE * (0.6 + 0.8 * fract(seed * 6.71));
+  vec3 p = rest;
+  p.xy += vec2(side * cos(angle), sin(angle)) * reach * travel;
+  float stride = travel * 0.06;
   for (int i = 0; i < 4; i++) p.xy += streamFlow(p.xy * 1.3 + seed * 0.35, time + float(i) * 0.4) * stride;
-  p.y += travel * travel * 0.12;
-  p.z += travel * (0.08 + 0.26 * seed - BOW_AHEAD * bowWave);
+  // The bow wave scales a particle's distance from the axis and also adds a fixed clearance,
+  // since a scale alone could never move a particle that sits right in front of the subject.
+  float bowWave = smoothstep(BOW_REACH, BOW_PEAK, camera.z - rest.z);
+  vec2 rel = p.xy - camera.xy;
+  p.xy += rel * travel * BOW_SPREAD * bowWave + normalize(rel + 1e-4) * travel * bowWave * BOW_CLEARANCE;
+  p.z -= travel * (WIND_BACK * (0.5 + seed) + BOW_AHEAD * bowWave);
   return p;
 }
 
