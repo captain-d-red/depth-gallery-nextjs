@@ -28,6 +28,7 @@ import { hexToLinear, type Vec3 } from '@/lib/color';
 import { clamp, damp, lerp, smoothstep } from '@/lib/math';
 import { createQuadGeometry } from './gl';
 import { POSTER_HEIGHT, placeFilm, type Placement } from './layout';
+import { FLIGHT_SECONDS, RELEASE_BINS } from './shaders/chunks';
 import {
   posterDustFragment,
   posterDustVertex,
@@ -107,6 +108,13 @@ interface FilmNode {
   visible: number;
   /** How far the poster has broken into ash as the camera walks through it. */
   release: number;
+  /**
+   * The moment the release front passed each bin of the sweep, in seconds, or NaN where it
+   * has not. Particles fly on this clock rather than on the scroll.
+   */
+  readonly freedAt: Float64Array;
+  /** When this poster's last particle lands, in seconds. */
+  dustUntil: number;
   title: { mesh: Mesh; dust: Mesh; texture: DataTexture; align: TitleAlign } | null;
 }
 
@@ -121,8 +129,8 @@ const MAX_LOADS = 4;
 const PAD = 0.1;
 /** Particles laid over a poster, roughly one per six and a half world millimetres. */
 const DUST_GRID = { columns: 150, rows: 225 } as const;
-/** Two posters at most are ever breaking up at once, so two particle systems are pooled. */
-const DUST_POOL = 2;
+/** Particles outlive their print, so up to three posters can be in the air at once. */
+const DUST_POOL = 3;
 /** Draw order steps per film. Deeper films draw first, so the scene paints back to front. */
 const ORDER_STEP = 10;
 /** Greatest lean of a print into the scroll, in radians, about six degrees. */
@@ -253,6 +261,8 @@ export class Films {
         tilt: new Vector2(),
         visible: 0,
         release: 0,
+        freedAt: new Float64Array(RELEASE_BINS).fill(Number.NaN),
+        dustUntil: Number.NEGATIVE_INFINITY,
         title: null,
       };
     });
@@ -308,6 +318,7 @@ export class Films {
     const zDist = frame.cameraZ - placement.z;
     const far = 1 - smoothstep(22, 30, zDist);
     node.release = 1 - smoothstep(1.15, 3.15, zDist);
+    this.stampRelease(node, frame.time);
     node.visible = far * (1 - node.release);
     poster.visible = far > 0.001 && node.release < 0.999;
 
@@ -521,7 +532,8 @@ export class Films {
             uDirection: { value: 1 },
             uSeed: { value: 0 },
             uTime: { value: 0 },
-            uSpeed: { value: 0 },
+            uDt: { value: 0 },
+            uElapsed: { value: new Float32Array(RELEASE_BINS) },
             uKey: { value: [1, 1, 1] },
           },
           side: DoubleSide,
@@ -535,10 +547,34 @@ export class Films {
     });
   }
 
-  /** Hands the pooled ash systems to the posters that are breaking up this frame. */
+  /**
+   * Stamps each bin of the sweep with the moment the front first passed it. Scrolling back
+   * clears the bins the front has left, so the print re-forms there and its particles fly
+   * afresh next time.
+   */
+  private stampRelease(node: FilmNode, now: number): void {
+    const { freedAt } = node;
+    let last = Number.NEGATIVE_INFINITY;
+    for (let b = 0; b < RELEASE_BINS; b++) {
+      const passed = node.release > 0 && node.release >= b / (RELEASE_BINS - 1);
+      if (!passed) freedAt[b] = Number.NaN;
+      else if (Number.isNaN(freedAt[b]!)) freedAt[b] = now;
+      if (passed) last = Math.max(last, freedAt[b]!);
+    }
+    node.dustUntil = last + FLIGHT_SECONDS;
+  }
+
+  /**
+   * Hands the pooled particle systems to the posters with particles in the air. A poster
+   * keeps its system while its print is breaking up and until its last particle lands, and
+   * gives it up once the camera is well past it.
+   */
   private assignPosterDust(frame: FilmsFrame): void {
     const breaking = this.nodes
-      .filter((n) => n.release > 0.001 && n.release < 0.999 && n.poster.visible)
+      .filter((n) => {
+        const inAir = n.release > 0.001 && (n.release < 0.999 || frame.time < n.dustUntil);
+        return inAir && frame.cameraZ - n.placement.z > -0.5;
+      })
       .slice(0, DUST_POOL);
     this.posterDust.forEach((mesh, i) => {
       const node = breaking[i];
@@ -557,7 +593,11 @@ export class Films {
       u.uDirection!.value = p.uDirection!.value;
       u.uSeed!.value = p.uSeed!.value;
       u.uTime!.value = frame.time;
-      u.uSpeed!.value = Math.abs(frame.velocity);
+      u.uDt!.value = frame.dt;
+      const elapsed = u.uElapsed!.value as Float32Array;
+      node.freedAt.forEach((at, b) => {
+        elapsed[b] = Number.isNaN(at) ? -1 : frame.time - at;
+      });
       u.uKey!.value = node.key;
       (u.uPlane!.value as number[])[0] = node.width;
       (u.uPlane!.value as number[])[1] = POSTER_HEIGHT;

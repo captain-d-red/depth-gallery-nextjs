@@ -10,6 +10,12 @@ export const glsl = (strings: TemplateStringsArray, ...values: (string | number)
 /** Seven posters around the camera, six light samples each. */
 export const MAX_LIGHTS = 42;
 
+/** Bins over a poster's release sweep, each stamped with the moment the front passed it. */
+export const RELEASE_BINS = 64;
+
+/** Seconds the longest-lived poster particle drifts, long enough to follow by eye at any scroll speed. */
+export const FLIGHT_SECONDS = 2;
+
 /** Three adds `#version 300 es` itself for materials created with `glslVersion: GLSL3`. */
 export const header = glsl`
 precision highp float;
@@ -165,6 +171,9 @@ export const release = glsl`
 /** How far ahead of the front a particle appears in place while the surface fades under it. */
 const float HANDOFF = 0.1;
 
+/** Release progress over which the front crosses one point of a surface. */
+const float FRONT_WIDTH = 0.42;
+
 /** Each particle leaves a little early or late, which scatters the front into grain. */
 float releaseJitter(float seed) {
   return (seed - 0.5) * 0.16;
@@ -174,7 +183,7 @@ float releaseFront(vec2 uv, float seed, float direction, float progress) {
   float sweep = direction > 0.0 ? uv.x : 1.0 - uv.x;
   float drifts = 0.66 * valueNoise2(uv * vec2(4.0, 2.6) + seed * 13.7) + 0.34 * valueNoise2(uv * vec2(11.0, 7.0) + seed * 5.3);
   float threshold = 0.5 * sweep + 0.5 * drifts;
-  return (progress * 1.42 - threshold) / 0.42;
+  return (progress * (1.0 + FRONT_WIDTH) - threshold) / FRONT_WIDTH;
 }
 
 /** Zero before the front arrives, rising to one as the grain finishes its flight. */

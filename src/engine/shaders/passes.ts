@@ -1,4 +1,16 @@
-import { MAX_LIGHTS, fullscreenVertex, glsl, haze, header, lens, noise, release, viewRay } from './chunks';
+import {
+  FLIGHT_SECONDS,
+  MAX_LIGHTS,
+  RELEASE_BINS,
+  fullscreenVertex,
+  glsl,
+  haze,
+  header,
+  lens,
+  noise,
+  release,
+  viewRay,
+} from './chunks';
 
 export { fullscreenVertex };
 
@@ -187,7 +199,8 @@ void main() {
 /**
  * Motion shared by every particle, poster or title.
  *
- * 1. The camera's wake pushes a particle gently outward and spins it round the view axis.
+ * 1. The camera's wake pushes a particle outward and spins it round the view axis, and the
+ *    push grows as the camera closes on it, so the cloud parts round the lens.
  * 2. A flow field carries it along streamlines. The field comes from a stream function, the
  *    sum of three travelling waves, and its velocity is the curl of that function:
  *
@@ -199,7 +212,7 @@ void main() {
  *    is integrated in four steps, so it curves.
  * 3. It lifts a little, as warm air would, and drifts in depth.
  *
- * Every term scales with travel, which eases in, so a particle leaves its surface slowly.
+ * Every term scales with travel, which each caller shapes over its particle's life.
  */
 const drift = glsl`
 vec2 streamFlow(vec2 p, float t) {
@@ -212,18 +225,19 @@ vec2 streamFlow(vec2 p, float t) {
   return c1 * vec2(k1.y, -k1.x) + c2 * vec2(k2.y, -k2.x) + c3 * vec2(k3.y, -k3.x);
 }
 
-vec3 particlePath(vec3 rest, vec3 camera, float r, float seed, float direction, float strength, float time) {
-  float travel = pow(r, 1.35) * strength;
+vec3 particlePath(vec3 rest, vec3 camera, float travel, float seed, float direction, float time) {
   vec2 rel = rest.xy - camera.xy;
   float spin = travel * 0.9 / (length(rel) + 0.5) * direction;
   float c = cos(spin);
   float s = sin(spin);
-  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.22 + 0.3 * seed));
+  // Air ahead of the camera is pushed outward and forward, harder the closer the camera comes.
+  float bowWave = 1.6 * smoothstep(1.8, 0.4, camera.z - rest.z);
+  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.22 + 0.3 * seed + bowWave));
   vec3 p = vec3(camera.xy + rel, rest.z);
   float stride = travel * 0.075;
   for (int i = 0; i < 4; i++) p.xy += streamFlow(p.xy * 1.3 + seed * 0.35, time + float(i) * 0.4) * stride;
   p.y += travel * travel * 0.12;
-  p.z += travel * (0.08 + 0.26 * seed);
+  p.z += travel * (0.08 + 0.26 * seed - 0.22 * bowWave);
   return p;
 }
 
@@ -256,7 +270,8 @@ Sprite placeSprite(vec3 p, vec3 before, float grainPx, vec2 corner) {
   sp.view = view;
   sp.bokeh = smoothstep(2.0, 5.0, coc / max(grainPx, 0.5));
   sp.stretch = streak / (size + streak);
-  sp.energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.02, 1.0);
+  // A defocused particle spreads its light over its disc, so its brightness falls with the area.
+  sp.energy = clamp((grainPx * grainPx) / (radiusPx * radiusPx), 0.003, 1.0);
   return sp;
 }
 `;
@@ -277,10 +292,15 @@ float spriteShape(vec2 p, float bokeh) {
  *
  * - A particle appears in place just ahead of the release front, while the print fades out
  *   under it, so the handoff is invisible.
- * - Once released it travels the shared path: the camera's wake, then the flow field.
- * - It keeps the print's colour and slowly takes on the film's key as it fades, so the image
- *   dissolves into the colour of the air it lit.
- * - Near the lens it opens into a soft bokeh disc, and at speed it streaks along its path.
+ * - The front follows the scroll, but a released particle flies on its own clock. Each part of
+ *   the sweep is stamped with the moment the front passed it, and the particle's age is the
+ *   time since then, so it drifts for FLIGHT_SECONDS however fast the scroll carried it free.
+ * - It travels the shared path, the camera's wake and then the flow field, keeps the print's
+ *   colour and slowly takes on the film's key as it fades, so the image dissolves into the
+ *   colour of the air it lit.
+ * - A share of the flakes are glossy. As one tumbles, its face turns the key light into the
+ *   lens for a moment and it flashes. A flash is far brighter than the print, so when the
+ *   flake is out of focus the flash opens into a glowing bokeh disc rather than fading out.
  */
 export const posterDustVertex = glsl`${header}
 ${noise}
@@ -301,7 +321,9 @@ uniform float uRelease;
 uniform float uDirection;
 uniform float uSeed;
 uniform float uTime;
-uniform float uSpeed;
+uniform float uDt;
+/** Seconds since the front passed each release bin, or below zero where it has not. */
+uniform vec4 uElapsed[${RELEASE_BINS / 4}];
 uniform vec3 uKey;
 in vec3 position;
 in vec3 aCell;
@@ -311,21 +333,58 @@ out float vAlpha;
 out float vBokeh;
 out float vStretch;
 
+/** Share of flakes glossy enough to flash, all of them among the longest lived. */
+const float GLOSSY_SHARE = 0.035;
+/**
+ * A flash's power against the print. It spreads over its bokeh disc like any light, so it is
+ * fourteen times brighter to stay visible when defocused, and it is clipped where the sensor
+ * would saturate, so in focus it blooms into a sparkle rather than a blown block.
+ */
+const float GLINT_POWER = 14.0;
+const float GLINT_CLIP = 1.5;
+
+float elapsedIn(int bin) {
+  vec4 v = uElapsed[bin / 4];
+  int lane = bin - (bin / 4) * 4;
+  return lane == 0 ? v.x : lane == 1 ? v.y : lane == 2 ? v.z : v.w;
+}
+
+/**
+ * Seconds since the front freed the point that is freed at sweep share x. Where the next bin
+ * is not yet stamped, the earlier stamp is the right one, since the point lies before the front.
+ */
+float elapsedSince(float x) {
+  float f = clamp(x, 0.0, 1.0) * float(${RELEASE_BINS - 1});
+  int i = int(floor(f));
+  float a = elapsedIn(i);
+  float b = elapsedIn(min(i + 1, ${RELEASE_BINS - 1}));
+  return b < 0.0 ? a : mix(a, b, fract(f));
+}
+
 void main() {
   // Each particle sits at a random spot inside its cell, so the rest pattern is never a grid.
   vec2 jitter = vec2(fract(aCell.z * 12.9898), fract(aCell.z * 78.233)) - 0.5;
   vec2 uv = clamp(aCell.xy + jitter / uGrid, 0.0, 1.0);
-  float front = releaseFront(uv, uSeed, uDirection, uRelease) + releaseJitter(aCell.z);
+  float seed = aCell.z;
+  float front = releaseFront(uv, uSeed, uDirection, uRelease) + releaseJitter(seed);
+  // The sweep share at which this particle is freed, where its front crosses zero.
+  float freedAt = uRelease - front * FRONT_WIDTH / (1.0 + FRONT_WIDTH);
+  float elapsed = front > 0.0 ? max(elapsedSince(freedAt), 0.0) : 0.0;
+  // Lives are heavy-tailed. Most fine particles fade within a half second, and a sparse share
+  // of motes drifts for the whole flight, so the puff thins out instead of hanging as a wall.
+  float draw = fract(seed * 7.31);
+  float life = 0.22 + 0.78 * pow(draw, 9.0);
+  float age = elapsed / ${FLIGHT_SECONDS.toFixed(2)};
+  float ageBefore = max(elapsed - uDt, 0.0) / ${FLIGHT_SECONDS.toFixed(2)};
   vLocal = position.xy;
   vBokeh = 0.0;
   vStretch = 0.0;
-  if (front <= -HANDOFF || front >= 1.0) {
+  if (front <= -HANDOFF || age >= life) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     vColor = vec3(0.0);
     vAlpha = 0.0;
     return;
   }
-  float r = clamp(front, 0.0, 1.0);
   vec3 image = mix(
     textureLod(uAtlas, uAtlasRect.xy + uv * uAtlasRect.zw, 0.0).rgb,
     textureLod(uMap, uv, 2.0).rgb,
@@ -334,27 +393,40 @@ void main() {
 
   vec3 rest = (modelMatrix * vec4((uv.x - 0.5) * uPlane.x, (uv.y - 0.5) * uPlane.y, 0.0, 1.0)).xyz;
   float t = uTime * 0.5;
-  vec3 p = particlePath(rest, cameraPosition, r, aCell.z, uDirection, 1.0, t);
-  vec3 before = particlePath(rest, cameraPosition, max(r - min(uSpeed * 0.05, 0.1), 0.0), aCell.z, uDirection, 1.0, t);
+  // A particle bursts free and then slows into a drift, so it leaves the print at once.
+  vec3 p = particlePath(rest, cameraPosition, 1.0 - pow(1.0 - min(age, 1.0), 2.4), seed, uDirection, t);
+  vec3 before = particlePath(rest, cameraPosition, 1.0 - pow(1.0 - min(ageBefore, 1.0), 2.4), seed, uDirection, t);
+  float spent = age / life;
   float depth = max(-(viewMatrix * vec4(p, 1.0)).z, 0.05);
-  float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.4 + 0.45 * fract(aCell.z * 5.31)) * (1.0 - r * 0.35);
+  float grainPx = (uPlane.x / uGrid.x) / (depth * uPxToView) * (0.55 + 0.5 * fract(seed * 5.31)) * (1.0 - spent * 0.3);
   Sprite sp = placeSprite(p, before, grainPx, position.xy);
   gl_Position = projectionMatrix * sp.view;
 
-  float lift = 1.0 + 0.3 * sin(r * 3.14159);
-  vColor = mix(image, uKey, smoothstep(0.2, 0.95, r) * 0.55) * (1.0 - 0.3 * r) * lift;
+  float lift = 1.0 + 0.3 * sin(spent * 3.14159);
+  vec3 colour = mix(image, uKey, smoothstep(0.2, 0.95, spent) * 0.55) * (1.0 - 0.3 * spent) * lift;
+  float tumble = uTime * (1.2 + 2.4 * fract(seed * 3.77)) + seed * 40.0;
+  float glossy = step(1.0 - GLOSSY_SHARE, draw);
+  float glint = glossy * pow(max(cos(tumble), 0.0), 96.0) * smoothstep(0.02, 0.15, age);
+  float glintLight = min(glint * GLINT_POWER * sp.energy, GLINT_CLIP);
+  vColor = colour * sp.energy + mix(vec3(1.0), uKey, 0.5) * glintLight;
   vBokeh = sp.bokeh;
   vStretch = sp.stretch;
   float appear = smoothstep(-HANDOFF, 0.0, front);
-  float nearFade = smoothstep(0.35, 1.2, depth);
-  vAlpha = appear * pow(1.0 - r, 1.6) * nearFade * sp.energy * (1.0 - 0.5 * sp.stretch);
+  // Fine ash starts thinning straight after its burst, and a mote holds until late in its drift.
+  float mote = smoothstep(0.5, 0.8, life);
+  float fade = 1.0 - smoothstep(mix(0.12, 0.45, mote), 1.0, spent);
+  // Fine ash thins out as it nears the lens, as a dense cloud there would only blur into a veil.
+  // The long-lived motes come right up to the lens, where they open into large bokeh discs.
+  float nearFade = smoothstep(mix(0.35, 0.12, mote), mix(1.2, 0.45, mote), depth);
+  vAlpha = appear * fade * nearFade * (1.0 - 0.5 * sp.stretch);
 }
 `;
 
 /**
  * A particle is a soft gaussian speck, stretched along its motion when it moves fast, and a
- * defocused one is a disc with a faint bright rim. It is half laid over and half added to
- * the scene, so it glows like the print it came from without ever blowing out.
+ * defocused one is a disc with a faint bright rim. A grain in focus is half laid over and half
+ * added to the scene, like a speck of the print, and a bokeh disc is pure light, as it is
+ * through a real lens.
  */
 export const posterDustFragment = glsl`${header}
 ${bokehSprite}
@@ -369,7 +441,7 @@ void main() {
   vec2 p = vec2(vLocal.x, vLocal.y * mix(1.0, 0.6, vStretch));
   float a = spriteShape(p, vBokeh) * vAlpha;
   if (a < 0.002) discard;
-  fragColor = vec4(vColor * a, a * 0.5);
+  fragColor = vec4(vColor * a, a * 0.5 * (1.0 - vBokeh));
 }
 `;
 
@@ -413,8 +485,9 @@ void main() {
   float r = clamp(front, 0.0, 1.0);
   vec3 rest = (modelMatrix * vec4((aPoint.x - 0.5) * uPlane.x, (aPoint.y - 0.5) * uPlane.y, 0.0, 1.0)).xyz;
   float t = uTime * 0.5 + uSeed * 10.0;
-  vec3 p = particlePath(rest, cameraPosition, r, aPoint.z, -uDirection, 0.75, t);
-  vec3 before = particlePath(rest, cameraPosition, max(r - min(uSpeed * 0.05, 0.1), 0.0), aPoint.z, -uDirection, 0.75, t);
+  float rBefore = max(r - min(uSpeed * 0.05, 0.1), 0.0);
+  vec3 p = particlePath(rest, cameraPosition, pow(r, 1.35) * 0.75, aPoint.z, -uDirection, t);
+  vec3 before = particlePath(rest, cameraPosition, pow(rBefore, 1.35) * 0.75, aPoint.z, -uDirection, t);
   Sprite sp = placeSprite(p, before, uPixel * aPoint.w * (1.0 + r * 1.4), position.xy);
   gl_Position = projectionMatrix * sp.view;
   vBokeh = sp.bokeh;
