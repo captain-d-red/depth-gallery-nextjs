@@ -216,6 +216,16 @@ void main() {
  * Every term scales with travel, which each caller shapes over its particle's life.
  */
 const drift = glsl`
+/** How far the camera's bow wave reaches ahead of it, and where it peaks, in world units. */
+const float BOW_REACH = 1.8;
+const float BOW_PEAK = 0.4;
+/** Extra outward spread the bow wave gives, as a share of distance from the camera's axis. */
+const float BOW_SPREAD = 1.6;
+/** Fixed outward clearance the bow wave gives, in world units, so the subject is cleared too. */
+const float BOW_CLEARANCE = 0.45;
+/** How far the bow wave pushes particles ahead, away from the lens, in world units. */
+const float BOW_AHEAD = 0.35;
+
 vec2 streamFlow(vec2 p, float t) {
   const vec2 k1 = vec2(1.9, 2.6);
   const vec2 k2 = vec2(-3.4, 1.4);
@@ -234,14 +244,14 @@ vec3 particlePath(vec3 rest, vec3 camera, float travel, float seed, float direct
   // Air ahead of the camera is pushed outward and forward, harder the closer the camera comes.
   // The push scales a particle's distance from the axis and also adds a fixed clearance, since
   // a scale alone could never move a particle that sits right in front of the subject.
-  float bowWave = smoothstep(1.8, 0.4, camera.z - rest.z);
-  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.22 + 0.3 * seed + 1.6 * bowWave));
-  rel += normalize(rel + 1e-4) * travel * bowWave * 0.45;
+  float bowWave = smoothstep(BOW_REACH, BOW_PEAK, camera.z - rest.z);
+  rel = mat2(c, s, -s, c) * rel * (1.0 + travel * (0.22 + 0.3 * seed + BOW_SPREAD * bowWave));
+  rel += normalize(rel + 1e-4) * travel * bowWave * BOW_CLEARANCE;
   vec3 p = vec3(camera.xy + rel, rest.z);
   float stride = travel * 0.075;
   for (int i = 0; i < 4; i++) p.xy += streamFlow(p.xy * 1.3 + seed * 0.35, time + float(i) * 0.4) * stride;
   p.y += travel * travel * 0.12;
-  p.z += travel * (0.08 + 0.26 * seed - 0.35 * bowWave);
+  p.z += travel * (0.08 + 0.26 * seed - BOW_AHEAD * bowWave);
   return p;
 }
 
@@ -419,8 +429,9 @@ void main() {
   // Fine ash starts thinning straight after its burst, and a mote holds until late in its drift.
   float fade = 1.0 - smoothstep(mix(0.12, 0.45, mote), 1.0, spent);
   // Particles fade as they near the lens, as engines do to spare fill rate and avoid a veil.
-  // Motes come closer than fine ash, where they open into the large bokeh discs.
-  float nearFade = smoothstep(mix(0.35, 0.2, mote), mix(1.2, 0.6, mote), depth);
+  // Fine ash is gone before it reaches the next film's framing distance, so it never hazes the
+  // landing, while motes come closer, where they open into the large bokeh discs.
+  float nearFade = smoothstep(mix(0.6, 0.2, mote), mix(1.8, 0.6, mote), depth);
   vAlpha = appear * fade * nearFade * (1.0 - 0.5 * sp.stretch);
 }
 `;

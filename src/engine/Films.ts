@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  Camera,
   CustomBlending,
   DataTexture,
   DoubleSide,
@@ -7,6 +8,7 @@ import {
   Group,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
+  type IUniform,
   LinearFilter,
   LinearMipmapLinearFilter,
   Mesh,
@@ -15,12 +17,12 @@ import {
   PlaneGeometry,
   RawShaderMaterial,
   RedFormat,
+  Scene,
   SRGBColorSpace,
   Texture,
   UnsignedByteType,
   Vector2,
   Vector3,
-  type IUniform,
   type WebGLRenderer,
 } from 'three';
 import { LIGHT_COLUMNS, LIGHT_ROWS, type Catalogue, type Film } from '@/data/catalogue';
@@ -269,6 +271,17 @@ export class Films {
     this.posterDust = this.createPosterDust();
   }
 
+  /**
+   * three builds a shader program the first time it draws a mesh, and the particle systems stay
+   * hidden until a poster first breaks up, so that first break-up would stall a frame for the
+   * compile. Showing them for one compile pass builds the program during the intro instead.
+   */
+  compileParticles(scene: Scene, camera: Camera): void {
+    for (const mesh of this.posterDust) mesh.visible = true;
+    this.renderer.compile(scene, camera);
+    for (const mesh of this.posterDust) mesh.visible = false;
+  }
+
   get count(): number {
     return this.nodes.length;
   }
@@ -400,8 +413,10 @@ export class Films {
       ty = posterTop - th / 2;
     }
     const z = node.placement.z - (stack ? 0.02 : 0.22);
+    // With reduced motion the type fades in place and throws nothing into the air.
+    title.mesh.visible = true;
+    title.dust.visible = !frame.reducedMotion;
     for (const mesh of [title.mesh, title.dust]) {
-      mesh.visible = true;
       mesh.position.set(tx, ty, z);
       mesh.scale.setScalar(titleScale);
     }

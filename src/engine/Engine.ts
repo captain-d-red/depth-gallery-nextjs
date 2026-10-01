@@ -177,6 +177,7 @@ export class Engine {
 
     this.films = new Films(catalogue, this.renderer, this.haze, this.lens, this.atlas, fontFamily, onError);
     this.mainScene.add(this.films.group);
+    this.films.compileParticles(this.mainScene, this.camera);
 
     // The mirror camera sees only the posters, reflected in the floor plane.
     this.mirrorCamera.layers.set(1);
