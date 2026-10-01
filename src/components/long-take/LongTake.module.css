@@ -41,3 +41,22 @@
   text-align: center;
   color: var(--paper-2);
 }
+
+/* The frame meter stays empty, and so invisible, unless the address asks for it with ?fps. */
+.meter {
+  position: absolute;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 0.6rem);
+  translate: -50% 0;
+  padding: 0.25em 0.6em;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.6);
+  color: var(--paper);
+  font-size: 0.7rem;
+  font-feature-settings: 'tnum' 1;
+  pointer-events: none;
+}
+
+.meter:empty {
+  display: none;
+}

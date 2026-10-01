@@ -30,6 +30,7 @@ import { hexToLinear, type Vec3 } from '@/lib/color';
 import { clamp, damp, lerp, smoothstep } from '@/lib/math';
 import { createQuadGeometry } from './gl';
 import { POSTER_HEIGHT, placeFilm, type Placement } from './layout';
+import type { Quality } from './quality';
 import { MOTE_SECONDS, RELEASE_BINS } from './shaders/chunks';
 import {
   posterDustFragment,
@@ -129,8 +130,6 @@ const MAX_LOADS = 4;
 
 /** World padding round each print, room for a defocused edge to spread. */
 const PAD = 0.1;
-/** Particles laid over a poster, roughly one per six and a half world millimetres. */
-const DUST_GRID = { columns: 150, rows: 225 } as const;
 /** Particles outlive their print, so up to three posters can be in the air at once. */
 const DUST_POOL = 3;
 /** Draw order steps per film. Deeper films draw first, so the scene paints back to front. */
@@ -198,6 +197,12 @@ export class Films {
   private readonly posterDust: Mesh<InstancedBufferGeometry, RawShaderMaterial>[];
   private readonly abort = new AbortController();
   private loads = 0;
+  /**
+   * Decoded posters waiting to reach the GPU. Several downloads can finish inside one frame,
+   * and uploading a poster with its mip chain all at once costs a phone a visible stall, so
+   * the frame loop takes them one at a time.
+   */
+  private readonly arrivals: { node: FilmNode; bitmap: ImageBitmap }[] = [];
   private titleBudget = 1;
   private mode: LayoutMode = 'spread';
 
@@ -209,6 +214,8 @@ export class Films {
     private readonly atlas: IUniform<Texture | null>,
     private readonly fontFamily: string,
     private readonly onError: (error: unknown) => void,
+    /** Grain cells across and down a poster's ash, from the device's quality profile. */
+    private readonly dust: Quality['dust'],
   ) {
     const { atlas: a } = catalogue;
     const rows = Math.ceil(catalogue.films.length / a.columns);
@@ -316,6 +323,7 @@ export class Films {
   }
 
   update(frame: FilmsFrame): void {
+    this.uploadArrival();
     if (frame.mode !== this.mode) {
       this.mode = frame.mode;
       for (const node of this.nodes) this.dropTitle(node);
@@ -519,7 +527,7 @@ export class Films {
 
   /** One grid of grain cells, shared by every pooled ash system. */
   private createPosterDust(): Mesh<InstancedBufferGeometry, RawShaderMaterial>[] {
-    const { columns, rows } = DUST_GRID;
+    const { columns, rows } = this.dust;
     const cells = new Float32Array(columns * rows * 3);
     for (let r = 0, i = 0; r < rows; r++) {
       for (let c = 0; c < columns; c++, i += 3) {
@@ -638,19 +646,7 @@ export class Films {
           bitmap.close();
           return;
         }
-        const texture = new Texture(bitmap);
-        texture.colorSpace = SRGBColorSpace;
-        texture.flipY = false;
-        texture.generateMipmaps = true;
-        texture.minFilter = LinearMipmapLinearFilter;
-        texture.magFilter = LinearFilter;
-        texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-        texture.needsUpdate = true;
-        this.renderer.initTexture(texture);
-        node.map = texture;
-        node.bitmap = bitmap;
-        node.mapState = 'ready';
-        node.posterUniforms.uMap!.value = texture;
+        this.arrivals.push({ node, bitmap });
       })
       .catch((error: unknown) => {
         if (this.abort.signal.aborted) return;
@@ -660,6 +656,31 @@ export class Films {
       .finally(() => {
         this.loads--;
       });
+  }
+
+  /** Uploads the oldest waiting poster, at most one per frame, with its mip chain. */
+  private uploadArrival(): void {
+    const arrival = this.arrivals.shift();
+    if (!arrival) return;
+    const { node, bitmap } = arrival;
+    // The camera may have moved on while the poster waited, so it is dropped if no longer wanted.
+    if (node.mapState !== 'loading') {
+      bitmap.close();
+      return;
+    }
+    const texture = new Texture(bitmap);
+    texture.colorSpace = SRGBColorSpace;
+    texture.flipY = false;
+    texture.generateMipmaps = true;
+    texture.minFilter = LinearMipmapLinearFilter;
+    texture.magFilter = LinearFilter;
+    texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    texture.needsUpdate = true;
+    this.renderer.initTexture(texture);
+    node.map = texture;
+    node.bitmap = bitmap;
+    node.mapState = 'ready';
+    node.posterUniforms.uMap!.value = texture;
   }
 
   private releaseMap(node: FilmNode): void {
@@ -701,6 +722,7 @@ export class Films {
 
   dispose(): void {
     this.abort.abort();
+    for (const { bitmap } of this.arrivals.splice(0)) bitmap.close();
     for (const node of this.nodes) {
       this.releaseMap(node);
       this.dropTitle(node);

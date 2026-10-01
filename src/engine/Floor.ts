@@ -30,13 +30,14 @@ export class Floor {
   readonly mesh: Mesh<PlaneGeometry, RawShaderMaterial>;
   private readonly uniforms: Record<string, IUniform>;
 
-  constructor(haze: HazeUniforms, reflection: Texture) {
+  constructor(haze: HazeUniforms, reflection: Texture, reflectionRows: number) {
     this.uniforms = {
       ...haze,
       uReflection: { value: reflection },
       uResolution: { value: [1, 1] },
       uReflect: { value: 0.95 },
       uAlbedo: { value: 0.1 },
+      uReflectionRows: { value: reflectionRows },
     };
     // Wide enough that its side edges never reach the frame, even at the far fog line.
     const geometry = new PlaneGeometry(400, DEPTH);

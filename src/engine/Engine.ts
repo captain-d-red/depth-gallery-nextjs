@@ -23,6 +23,7 @@ import { Films, floorHeight, type HazeUniforms, type LayoutMode, type LensUnifor
 import { Floor } from './Floor';
 import { createFullscreenGeometry, createHdrTarget, createScreenPass } from './gl';
 import { FOCUS, cameraZForPosition, dwell } from './layout';
+import { FrameGovernor, type Quality } from './quality';
 import { MAX_LIGHTS } from './shaders/chunks';
 import { backdropFragment, bloomExtractFragment, blurFragment, hazeFragment, postFragment } from './shaders/passes';
 
@@ -31,6 +32,8 @@ export interface EngineOptions {
   readonly catalogue: Catalogue;
   readonly fontFamily: string;
   readonly reducedMotion: boolean;
+  /** How much work a frame may cost on this device. */
+  readonly quality: Quality;
   readonly onError: (error: unknown) => void;
 }
 
@@ -93,10 +96,13 @@ export class Engine {
   private readonly basis = { right: new Vector3(), up: new Vector3(), forward: new Vector3() };
   private readonly abort = new AbortController();
   private readonly reducedMotion: boolean;
+  private readonly quality: Quality;
+  private readonly governor: FrameGovernor;
 
   private width = 1;
   private height = 1;
   private pixelRatio = 1;
+  private deviceRatio = 1;
   private mode: LayoutMode = 'spread';
   private startTime: number | null = null;
   private lastTime = 0;
@@ -107,8 +113,10 @@ export class Engine {
   private focus = FOCUS;
   private hovered: PosterHit | null = null;
 
-  constructor({ canvas, catalogue, fontFamily, reducedMotion, onError }: EngineOptions) {
+  constructor({ canvas, catalogue, fontFamily, reducedMotion, quality, onError }: EngineOptions) {
     this.reducedMotion = reducedMotion;
+    this.quality = quality;
+    this.governor = new FrameGovernor(quality.maxPixelRatio);
     this.renderer = new WebGLRenderer({
       canvas,
       antialias: false,
@@ -123,7 +131,7 @@ export class Engine {
 
     this.hazeTarget = createHdrTarget(0, false);
     this.mirrorTarget = createHdrTarget(0, false);
-    this.sceneTarget = createHdrTarget(4, false);
+    this.sceneTarget = createHdrTarget(quality.samples, false);
     this.bloomTargets = [createHdrTarget(0, false), createHdrTarget(0, false)];
     this.screenGeometry = createFullscreenGeometry();
 
@@ -172,10 +180,19 @@ export class Engine {
     backdrop.renderOrder = -10;
     this.mainScene.add(backdrop);
 
-    this.floor = new Floor(this.haze, this.mirrorTarget.texture);
+    this.floor = new Floor(this.haze, this.mirrorTarget.texture, quality.reflectionRows);
     this.mainScene.add(this.floor.mesh);
 
-    this.films = new Films(catalogue, this.renderer, this.haze, this.lens, this.atlas, fontFamily, onError);
+    this.films = new Films(
+      catalogue,
+      this.renderer,
+      this.haze,
+      this.lens,
+      this.atlas,
+      fontFamily,
+      onError,
+      quality.dust,
+    );
     this.mainScene.add(this.films.group);
     this.films.compileParticles(this.mainScene, this.camera);
 
@@ -191,6 +208,7 @@ export class Engine {
       uResolution: { value: new Vector2(1, 1) },
       uVanish: { value: new Vector2(0.5, 0.5) },
       uSmear: { value: 0 },
+      uSmearTaps: { value: quality.smearTaps },
       uTime: { value: 0 },
       uExposure: { value: 1 },
       uGrain: { value: 0.018 },
@@ -223,11 +241,16 @@ export class Engine {
       });
   }
 
-  /** Sizes the drawing buffer to the canvas, trading pixel ratio for a fixed pixel budget. */
+  /**
+   * Sizes the drawing buffer to the canvas. The pixel ratio is capped by the quality profile,
+   * lowered further by the frame governor if the device falls behind, and traded down to a
+   * fixed pixel budget on very large screens.
+   */
   resize(width: number, height: number, devicePixelRatio: number): void {
     this.width = Math.max(1, width);
     this.height = Math.max(1, height);
-    let dpr = Math.min(devicePixelRatio, 2);
+    this.deviceRatio = devicePixelRatio;
+    let dpr = Math.min(devicePixelRatio, this.governor.pixelRatio);
     while (dpr > 1 && this.width * this.height * dpr * dpr > PIXEL_BUDGET) dpr -= 0.125;
     this.pixelRatio = dpr;
     this.renderer.setPixelRatio(dpr);
@@ -235,8 +258,8 @@ export class Engine {
     const w = Math.round(this.width * dpr);
     const h = Math.round(this.height * dpr);
     this.sceneTarget.setSize(w, h);
-    this.hazeTarget.setSize(Math.ceil(w / 2), Math.ceil(h / 2));
-    this.mirrorTarget.setSize(Math.ceil(w / 2), Math.ceil(h / 2));
+    this.hazeTarget.setSize(Math.ceil(w * this.quality.hazeScale), Math.ceil(h * this.quality.hazeScale));
+    this.mirrorTarget.setSize(Math.ceil(w * this.quality.mirrorScale), Math.ceil(h * this.quality.mirrorScale));
     const bw = Math.ceil(w / 4);
     const bh = Math.ceil(h / 4);
     for (const target of this.bloomTargets) target.setSize(bw, bh);
@@ -261,9 +284,14 @@ export class Engine {
   frame(timeMs: number, input: EngineInput): EngineFrame {
     const time = timeMs / 1000;
     this.startTime ??= time;
-    const dt = clamp(time - (this.lastTime || time), 1 / 240, 1 / 20);
+    const interval = time - (this.lastTime || time);
+    const dt = clamp(interval, 1 / 240, 1 / 20);
     this.lastTime = time;
     const intro = this.reducedMotion ? 1 : clamp((time - this.startTime) / INTRO_SECONDS, 0, 1);
+    // Once the intro has played, a device that keeps missing its frames drops to a lower density.
+    if (intro >= 1 && this.governor.sample(interval * 1000, timeMs) !== null) {
+      this.resize(this.width, this.height, this.deviceRatio);
+    }
 
     const scroll = clamp(input.position, 0, this.films.count - 1);
     const previous = this.lastScroll ?? scroll;
@@ -298,7 +326,7 @@ export class Engine {
       filmsFrame,
       this.haze.uLightPos.value,
       this.haze.uLightCol.value,
-      MAX_LIGHTS,
+      Math.min(MAX_LIGHTS, this.quality.lights),
     );
     this.haze.uTime.value = time;
 
@@ -400,6 +428,11 @@ export class Engine {
     this.mirrorCamera.projectionMatrixInverse.copy(this.camera.projectionMatrixInverse);
     this.mirrorCamera.matrixWorld.multiplyMatrices(this.mirror, this.camera.matrixWorld);
     this.mirrorCamera.matrixWorldInverse.copy(this.mirrorCamera.matrixWorld).invert();
+  }
+
+  /** Pixel ratio the drawing buffer is rendered at right now, after the governor. */
+  get renderRatio(): number {
+    return this.pixelRatio;
   }
 
   /** The poster under the pointer on the last frame, or null. */

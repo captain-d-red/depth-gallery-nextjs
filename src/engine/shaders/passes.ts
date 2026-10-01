@@ -591,6 +591,8 @@ uniform sampler2D uReflection;
 uniform vec2 uResolution;
 uniform float uReflect;
 uniform float uAlbedo;
+/** Half height of the reflection blur in taps, four at full quality and fewer on a phone. */
+uniform int uReflectionRows;
 in vec3 vWorld;
 out vec4 fragColor;
 
@@ -603,6 +605,7 @@ void main() {
   vec3 reflection = vec3(0.0);
   float weight = 0.0;
   for (int j = -4; j <= 4; j++) {
+    if (abs(j) > uReflectionRows) continue;
     for (int i = -1; i <= 1; i++) {
       float w = exp(-float(j * j) * 0.2 - float(i * i) * 0.9);
       reflection += texture(uReflection, suv + vec2(float(i) * 0.0014, float(j) * 0.0036)).rgb * w;
@@ -680,6 +683,8 @@ uniform float uHalation;
 uniform vec2 uResolution;
 uniform vec2 uVanish;
 uniform float uSmear;
+/** Taps of the travel smear, twelve at full quality and fewer on a phone. */
+uniform int uSmearTaps;
 uniform float uTime;
 uniform float uExposure;
 uniform float uGrain;
@@ -705,11 +710,12 @@ void main() {
   vec2 toCentre = vUv - uVanish;
   vec3 col = vec3(0.0);
   if (uSmear > 0.0005) {
-    const int TAPS = 12;
+    const int MAX_TAPS = 12;
     float weight = 0.0;
     float jitter = hash12(gl_FragCoord.xy + fract(uTime) * 91.0);
-    for (int i = 0; i < TAPS; i++) {
-      float t = (float(i) + jitter) / float(TAPS);
+    for (int i = 0; i < MAX_TAPS; i++) {
+      if (i >= uSmearTaps) break;
+      float t = (float(i) + jitter) / float(uSmearTaps);
       float s = 1.0 - uSmear * t;
       float w = 1.0 - t * 0.7;
       float split = uSmear * 0.16 * t;

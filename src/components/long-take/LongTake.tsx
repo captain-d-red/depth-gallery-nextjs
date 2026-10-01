@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { catalogue } from '@/data/catalogue';
 import { Engine } from '@/engine/Engine';
 import { SCROLL_PER_FILM } from '@/engine/layout';
+import { QUALITY, pickQuality, type Quality } from '@/engine/quality';
 import { uiFont } from '@/lib/fonts';
 import { clamp } from '@/lib/math';
 import { Hud, type HudHandle } from './Hud';
@@ -16,6 +17,19 @@ const COUNT = catalogue.films.length;
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 /**
+ * The quality profile for this device. `?quality=full` or `?quality=handheld` overrides the
+ * choice, so the two can be compared on the same phone.
+ */
+function chooseQuality(): Quality {
+  const forced = new URLSearchParams(window.location.search).get('quality');
+  if (forced === 'full' || forced === 'handheld') return QUALITY[forced];
+  return pickQuality({
+    coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+    shortSide: Math.min(window.screen.width, window.screen.height),
+  });
+}
+
+/**
  * The page's one moving part. React owns the structure and the current film, while the
  * frame loop drives the engine and writes per-frame readouts straight into the HUD, so
  * nothing re-renders at sixty frames a second.
@@ -23,6 +37,7 @@ const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2
 export function LongTake() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hudRef = useRef<HudHandle>(null);
+  const meterRef = useRef<HTMLOutputElement>(null);
   const jumpRef = useRef<(index: number) => void>(() => {});
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState<Status>('starting');
@@ -31,6 +46,11 @@ export function LongTake() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const quality = chooseQuality();
+    document.documentElement.dataset.quality = quality.name;
+    const meter = new URLSearchParams(window.location.search).has('fps') ? meterRef.current : null;
+    let meterFrames = 0;
+    let meterSince = 0;
     const lenis = new Lenis({ autoRaf: false, lerp: reducedMotion ? 1 : 0.075, wheelMultiplier: 0.85 });
     const pointer = { x: 0, y: 0, active: false };
     let engine: Engine | null = null;
@@ -83,6 +103,15 @@ export function LongTake() {
         pointerActive: pointer.active,
       });
       hudRef.current?.update(frame);
+      if (meter) {
+        meterFrames += 1;
+        if (time - meterSince >= 500) {
+          const fps = (meterFrames * 1000) / (time - meterSince);
+          meter.textContent = `${fps.toFixed(0)} fps · ${quality.name} · ${engine.renderRatio.toFixed(2)}×`;
+          meterFrames = 0;
+          meterSince = time;
+        }
+      }
       canvas.style.cursor = frame.hovered !== null && frame.hovered !== frame.index ? 'pointer' : '';
       if (frame.index !== shownIndex) {
         shownIndex = frame.index;
@@ -98,6 +127,7 @@ export function LongTake() {
           catalogue,
           fontFamily: uiFont.style.fontFamily,
           reducedMotion,
+          quality,
           onError: (error) => console.error(error),
         });
       } catch (error) {
@@ -143,6 +173,8 @@ export function LongTake() {
       <div className={styles.stage}>
         <canvas ref={canvasRef} className={styles.canvas} aria-hidden="true" />
         <Hud ref={hudRef} film={film} index={index} onJump={(i) => jumpRef.current(i)} />
+        {/* Frame meter, shown with ?fps in the address, for checking the rate on a real phone. */}
+        <output ref={meterRef} className={styles.meter} aria-hidden="true" />
       </div>
       {status === 'unsupported' && (
         <p className={styles.unsupported} role="status">
